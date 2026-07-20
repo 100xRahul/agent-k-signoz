@@ -9,10 +9,13 @@ SIGNOZ_NETWORK := signoz
 
 setup-signoz:
 	@echo "📡 Setting up SigNoz self-host..."
-	@mkdir -p deploy/signoz
 	@if [ ! -f $(SIGNOZ_COMPOSE) ]; then \
-		echo "Downloading SigNoz docker-compose..."; \
-		curl -sL https://github.com/SigNoz/signoz/releases/latest/download/docker-compose.yaml -o $(SIGNOZ_COMPOSE); \
+		echo "Cloning SigNoz repository to retrieve clickhouse-setup..."; \
+		git clone --depth 1 https://github.com/SigNoz/signoz.git deploy/signoz-repo; \
+		mkdir -p deploy/signoz; \
+		cp -r deploy/signoz-repo/deploy/docker/clickhouse-setup/* deploy/signoz/; \
+		rm -rf deploy/signoz-repo; \
+		echo "SigNoz self-host config files copied to deploy/signoz/"; \
 	fi
 
 up: setup-signoz
