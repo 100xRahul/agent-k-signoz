@@ -1,0 +1,176 @@
+services:
+  # ─── MCP Server ─────────────────────────────────────────
+  mcp-server:
+    image: signoz/signoz-mcp-server:latest
+    environment:
+      - TRANSPORT_MODE=http
+      - SIGNOZ_URL=http://signoz:8080
+      - SIGNOZ_API_KEY=${SIGNOZ_API_KEY}
+    ports:
+      - "8000:8000"
+    networks:
+      - signoz_default
+    restart: unless-stopped
+
+  # ─── Postgres (sandbox) ────────────────────────────────
+  sandbox-postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: payments
+      POSTGRES_USER: payments
+      POSTGRES_PASSWORD: payments123
+    volumes:
+      - sandbox_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U payments"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - signoz_default
+
+  # ─── Redis (sandbox) ───────────────────────────────────
+  sandbox-redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - signoz_default
+
+  # ─── Gateway ───────────────────────────────────────────
+  gateway:
+    build: ./sandbox/gateway
+    ports:
+      - "8001:8001"
+    environment:
+      - OTEL_SERVICE_NAME=gateway
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://signoz-otel-collector:4317
+      - OTEL_RESOURCE_ATTRIBUTES=deployment.environment=production,service.version=1.0.0
+      - CHECKOUT_URL=http://checkout:8002
+      - INVENTORY_URL=http://inventory:8004
+    depends_on:
+      - checkout
+      - inventory
+    networks:
+      - signoz_default
+    restart: unless-stopped
+
+  # ─── Checkout ──────────────────────────────────────────
+  checkout:
+    build: ./sandbox/checkout
+    ports:
+      - "8002:8002"
+    environment:
+      - OTEL_SERVICE_NAME=checkout
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://signoz-otel-collector:4317
+      - OTEL_RESOURCE_ATTRIBUTES=deployment.environment=production,service.version=${CHECKOUT_VERSION:-1.4.1}
+      - SERVICE_VERSION=${CHECKOUT_VERSION:-1.4.1}
+      - CHAOS_MODE=${CHAOS_MODE:-}
+      - PAYMENT_URL=http://payment:8003
+      - INVENTORY_URL=http://inventory:8004
+      - REDIS_URL=redis://sandbox-redis:6379
+    depends_on:
+      sandbox-redis:
+        condition: service_healthy
+    networks:
+      - signoz_default
+    restart: unless-stopped
+
+  # ─── Payment ───────────────────────────────────────────
+  payment:
+    build: ./sandbox/payment
+    ports:
+      - "8003:8003"
+    environment:
+      - OTEL_SERVICE_NAME=payment
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://signoz-otel-collector:4317
+      - OTEL_RESOURCE_ATTRIBUTES=deployment.environment=production,service.version=1.0.0
+      - PG_DSN=postgresql://payments:payments123@sandbox-postgres:5432/payments
+      - POOL_SIZE=10
+      - REDIS_URL=redis://sandbox-redis:6379
+    depends_on:
+      sandbox-postgres:
+        condition: service_healthy
+      sandbox-redis:
+        condition: service_healthy
+    networks:
+      - signoz_default
+    restart: unless-stopped
+
+  # ─── Inventory ─────────────────────────────────────────
+  inventory:
+    build: ./sandbox/inventory
+    ports:
+      - "8004:8004"
+    environment:
+      - OTEL_SERVICE_NAME=inventory
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://signoz-otel-collector:4317
+      - OTEL_RESOURCE_ATTRIBUTES=deployment.environment=production,service.version=1.0.0
+      - REDIS_URL=redis://sandbox-redis:6379
+    depends_on:
+      sandbox-redis:
+        condition: service_healthy
+    networks:
+      - signoz_default
+    restart: unless-stopped
+
+  # ─── Load Generator ───────────────────────────────────
+  loadgen:
+    build: ./sandbox/loadgen
+    environment:
+      - TARGET=http://gateway:8001
+      - RPS=5
+      - REDIS_URL=redis://sandbox-redis:6379
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://signoz-otel-collector:4317
+    depends_on:
+      - gateway
+    networks:
+      - signoz_default
+    restart: unless-stopped
+
+  # ─── Agent K ───────────────────────────────────────────
+  agent:
+    build: ./agent
+    ports:
+      - "9000:9000"
+    environment:
+      - OTEL_SERVICE_NAME=agent-k
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://signoz-otel-collector:4317
+      - OTEL_RESOURCE_ATTRIBUTES=deployment.environment=production,service.version=1.0.0
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+      - LLM_INPUT_PRICE_PER_MTOK=${LLM_INPUT_PRICE_PER_MTOK:-0}
+      - LLM_OUTPUT_PRICE_PER_MTOK=${LLM_OUTPUT_PRICE_PER_MTOK:-0}
+      - SIGNOZ_URL=${SIGNOZ_URL:-http://localhost:8080}
+      - MCP_URL=http://mcp-server:8000
+      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL:-}
+      - AGENT_PUBLIC_URL=${AGENT_PUBLIC_URL:-http://localhost:9000}
+      - APPROVAL_SECRET=${APPROVAL_SECRET:-change-me}
+      - AUTO_APPROVE=${AUTO_APPROVE:-false}
+      - MAX_ITERATIONS=${MAX_ITERATIONS:-20}
+      - MAX_COST_USD_PER_INVESTIGATION=${MAX_COST_USD_PER_INVESTIGATION:-1.00}
+      - DB_PATH=/data/agentk.db
+      - REDIS_URL=redis://sandbox-redis:6379
+    volumes:
+      - agent_data:/data
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./docker-compose.yml:/app/docker-compose.yml:ro
+    depends_on:
+      - mcp-server
+      - sandbox-redis
+    networks:
+      - signoz_default
+    restart: unless-stopped
+
+volumes:
+  sandbox_pgdata:
+  agent_data:
+
+networks:
+  signoz_default:
+    external: true
+    name: signoz_default

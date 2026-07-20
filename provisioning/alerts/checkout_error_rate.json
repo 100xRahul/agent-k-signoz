@@ -1,0 +1,53 @@
+{
+    "alert": "checkout-error-rate",
+    "alertType": "TRACES_BASED_ALERT",
+    "ruleType": "threshold_rule",
+    "condition": {
+        "compositeQuery": {
+            "queryType": "builder",
+            "builderQueries": {
+                "A": {
+                    "dataSource": "traces",
+                    "queryName": "A",
+                    "aggregateOperator": "rate",
+                    "aggregateAttribute": {
+                        "key": "has_error",
+                        "type": "tag",
+                        "dataType": "bool"
+                    },
+                    "filters": {
+                        "items": [
+                            {
+                                "key": {"key": "service.name", "type": "resource", "dataType": "string"},
+                                "op": "=",
+                                "value": "checkout"
+                            },
+                            {
+                                "key": {"key": "has_error", "type": "tag", "dataType": "bool"},
+                                "op": "=",
+                                "value": "true"
+                            }
+                        ],
+                        "op": "AND"
+                    },
+                    "expression": "A",
+                    "disabled": false,
+                    "stepInterval": 60
+                }
+            }
+        },
+        "op": ">",
+        "target": 0.1,
+        "matchType": "1"
+    },
+    "evalWindow": "1m0s",
+    "labels": {
+        "severity": "critical",
+        "service": "checkout",
+        "scenario": "bad-deploy"
+    },
+    "annotations": {
+        "summary": "Checkout error rate exceeds 10%",
+        "description": "The checkout service is experiencing elevated error rates, possibly due to a bad deployment."
+    }
+}

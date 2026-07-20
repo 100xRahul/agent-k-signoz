@@ -1,0 +1,50 @@
+{
+    "alert": "checkout-p99-latency",
+    "alertType": "TRACES_BASED_ALERT",
+    "ruleType": "threshold_rule",
+    "condition": {
+        "compositeQuery": {
+            "queryType": "builder",
+            "builderQueries": {
+                "A": {
+                    "dataSource": "traces",
+                    "queryName": "A",
+                    "aggregateOperator": "p99",
+                    "aggregateAttribute": {
+                        "key": "duration_nano",
+                        "type": "tag",
+                        "dataType": "float64"
+                    },
+                    "filters": {
+                        "items": [
+                            {
+                                "key": {"key": "service.name", "type": "resource", "dataType": "string"},
+                                "op": "=",
+                                "value": "checkout"
+                            }
+                        ],
+                        "op": "AND"
+                    },
+                    "groupBy": [
+                        {"key": "service.name", "type": "resource", "dataType": "string"}
+                    ],
+                    "expression": "A",
+                    "disabled": false,
+                    "stepInterval": 60
+                }
+            }
+        },
+        "op": ">",
+        "target": 1500000000,
+        "matchType": "1"
+    },
+    "evalWindow": "1m0s",
+    "labels": {
+        "severity": "warning",
+        "service": "checkout"
+    },
+    "annotations": {
+        "summary": "Checkout P99 latency exceeds 1.5s",
+        "description": "The checkout service P99 latency has spiked above 1.5 seconds."
+    }
+}

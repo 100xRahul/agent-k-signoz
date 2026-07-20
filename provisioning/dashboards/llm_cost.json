@@ -1,0 +1,176 @@
+{
+    "data": {
+        "title": "LLM Cost Tracker",
+        "description": "Per-model, per-investigation LLM cost tracking with budget alert threshold",
+        "tags": ["agent-k", "llm-cost"],
+        "layout": [
+            {"i": "total-cost", "x": 0, "y": 0, "w": 4, "h": 3},
+            {"i": "total-tokens", "x": 4, "y": 0, "w": 4, "h": 3},
+            {"i": "avg-cost-per-investigation", "x": 8, "y": 0, "w": 4, "h": 3},
+            {"i": "cost-over-time", "x": 0, "y": 3, "w": 12, "h": 4},
+            {"i": "cost-by-investigation", "x": 0, "y": 7, "w": 6, "h": 3},
+            {"i": "tokens-input-vs-output", "x": 6, "y": 7, "w": 6, "h": 3}
+        ],
+        "widgets": [
+            {
+                "id": "total-cost",
+                "title": "💰 Total Cost (USD)",
+                "panelTypes": "value",
+                "query": {
+                    "queryType": "builder",
+                    "builder": {
+                        "queryData": [{
+                            "dataSource": "metrics",
+                            "queryName": "A",
+                            "aggregateOperator": "sum",
+                            "aggregateAttribute": {"key": "agentk.cost.usd", "type": "Sum"},
+                            "expression": "A",
+                            "disabled": false
+                        }]
+                    }
+                }
+            },
+            {
+                "id": "total-tokens",
+                "title": "🔤 Total Tokens",
+                "panelTypes": "value",
+                "query": {
+                    "queryType": "builder",
+                    "builder": {
+                        "queryData": [{
+                            "dataSource": "traces",
+                            "queryName": "A",
+                            "aggregateOperator": "sum",
+                            "aggregateAttribute": {"key": "gen_ai.usage.input_tokens", "type": "tag", "dataType": "float64"},
+                            "filters": {
+                                "items": [{
+                                    "key": {"key": "service.name", "type": "resource", "dataType": "string"},
+                                    "op": "=",
+                                    "value": "agent-k"
+                                }],
+                                "op": "AND"
+                            },
+                            "expression": "A",
+                            "disabled": false
+                        }]
+                    }
+                }
+            },
+            {
+                "id": "avg-cost-per-investigation",
+                "title": "📊 Avg Cost / Investigation",
+                "panelTypes": "value",
+                "query": {
+                    "queryType": "builder",
+                    "builder": {
+                        "queryData": [{
+                            "dataSource": "traces",
+                            "queryName": "A",
+                            "aggregateOperator": "avg",
+                            "aggregateAttribute": {"key": "agentk.total_cost_usd", "type": "tag", "dataType": "float64"},
+                            "filters": {
+                                "items": [{
+                                    "key": {"key": "service.name", "type": "resource", "dataType": "string"},
+                                    "op": "=",
+                                    "value": "agent-k"
+                                }, {
+                                    "key": {"key": "name", "type": "tag", "dataType": "string"},
+                                    "op": "=",
+                                    "value": "investigation"
+                                }],
+                                "op": "AND"
+                            },
+                            "expression": "A",
+                            "disabled": false
+                        }]
+                    }
+                }
+            },
+            {
+                "id": "cost-over-time",
+                "title": "💵 Cost Over Time (with $2/hr budget line)",
+                "panelTypes": "graph",
+                "query": {
+                    "queryType": "builder",
+                    "builder": {
+                        "queryData": [{
+                            "dataSource": "metrics",
+                            "queryName": "A",
+                            "aggregateOperator": "rate",
+                            "aggregateAttribute": {"key": "agentk.cost.usd", "type": "Sum"},
+                            "expression": "A",
+                            "disabled": false
+                        }]
+                    }
+                }
+            },
+            {
+                "id": "cost-by-investigation",
+                "title": "Cost by Investigation",
+                "panelTypes": "table",
+                "query": {
+                    "queryType": "builder",
+                    "builder": {
+                        "queryData": [{
+                            "dataSource": "traces",
+                            "queryName": "A",
+                            "aggregateOperator": "sum",
+                            "aggregateAttribute": {"key": "llm.cost.usd", "type": "tag", "dataType": "float64"},
+                            "filters": {
+                                "items": [{
+                                    "key": {"key": "service.name", "type": "resource", "dataType": "string"},
+                                    "op": "=",
+                                    "value": "agent-k"
+                                }],
+                                "op": "AND"
+                            },
+                            "groupBy": [{"key": "agentk.alertname", "type": "tag", "dataType": "string"}],
+                            "orderBy": [{"columnName": "value", "order": "desc"}],
+                            "limit": 20,
+                            "expression": "A",
+                            "disabled": false
+                        }]
+                    }
+                }
+            },
+            {
+                "id": "tokens-input-vs-output",
+                "title": "Input vs Output Tokens",
+                "panelTypes": "graph",
+                "query": {
+                    "queryType": "builder",
+                    "builder": {
+                        "queryData": [
+                            {
+                                "dataSource": "traces",
+                                "queryName": "A",
+                                "aggregateOperator": "sum",
+                                "aggregateAttribute": {"key": "gen_ai.usage.input_tokens", "type": "tag", "dataType": "float64"},
+                                "filters": {
+                                    "items": [{"key": {"key": "service.name", "type": "resource", "dataType": "string"}, "op": "=", "value": "agent-k"}],
+                                    "op": "AND"
+                                },
+                                "expression": "A",
+                                "disabled": false,
+                                "legend": "Input Tokens"
+                            },
+                            {
+                                "dataSource": "traces",
+                                "queryName": "B",
+                                "aggregateOperator": "sum",
+                                "aggregateAttribute": {"key": "gen_ai.usage.output_tokens", "type": "tag", "dataType": "float64"},
+                                "filters": {
+                                    "items": [{"key": {"key": "service.name", "type": "resource", "dataType": "string"}, "op": "=", "value": "agent-k"}],
+                                    "op": "AND"
+                                },
+                                "expression": "B",
+                                "disabled": false,
+                                "legend": "Output Tokens"
+                            }
+                        ]
+                    }
+                }
+            }
+        ]
+    }
+}

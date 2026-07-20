@@ -1,0 +1,243 @@
+{
+    "data": {
+        "title": "AstroMart Overview",
+        "description": "Service health, error rates, latency, and business metrics for the AstroMart sandbox",
+        "tags": ["agent-k", "sandbox"],
+        "layout": [
+            {
+                "i": "error-rate-by-service",
+                "x": 0, "y": 0, "w": 6, "h": 3
+            },
+            {
+                "i": "p99-by-version",
+                "x": 6, "y": 0, "w": 6, "h": 3
+            },
+            {
+                "i": "top-10-slowest-routes",
+                "x": 0, "y": 3, "w": 6, "h": 3
+            },
+            {
+                "i": "failed-order-value",
+                "x": 6, "y": 3, "w": 6, "h": 3
+            },
+            {
+                "i": "impacted-users",
+                "x": 0, "y": 6, "w": 6, "h": 3
+            },
+            {
+                "i": "per-tenant-request-rate",
+                "x": 6, "y": 6, "w": 6, "h": 3
+            }
+        ],
+        "widgets": [
+            {
+                "id": "error-rate-by-service",
+                "title": "Error Rate by Service",
+                "description": "Percentage of errored requests per service",
+                "panelTypes": "graph",
+                "query": {
+                    "queryType": "builder",
+                    "builder": {
+                        "queryData": [
+                            {
+                                "dataSource": "traces",
+                                "queryName": "A",
+                                "aggregateOperator": "rate",
+                                "aggregateAttribute": {
+                                    "key": "has_error",
+                                    "type": "tag",
+                                    "dataType": "bool"
+                                },
+                                "filters": {
+                                    "items": [
+                                        {
+                                            "key": {"key": "has_error", "type": "tag", "dataType": "bool"},
+                                            "op": "=",
+                                            "value": "true"
+                                        }
+                                    ],
+                                    "op": "AND"
+                                },
+                                "groupBy": [
+                                    {"key": "service.name", "type": "resource", "dataType": "string"}
+                                ],
+                                "expression": "A",
+                                "disabled": false
+                            }
+                        ]
+                    }
+                }
+            },
+            {
+                "id": "p99-by-version",
+                "title": "P99 Latency by Service Version",
+                "description": "Rollout comparison: p99 duration grouped by service.version",
+                "panelTypes": "graph",
+                "query": {
+                    "queryType": "builder",
+                    "builder": {
+                        "queryData": [
+                            {
+                                "dataSource": "traces",
+                                "queryName": "A",
+                                "aggregateOperator": "p99",
+                                "aggregateAttribute": {
+                                    "key": "duration_nano",
+                                    "type": "tag",
+                                    "dataType": "float64"
+                                },
+                                "groupBy": [
+                                    {"key": "service.name", "type": "resource", "dataType": "string"},
+                                    {"key": "service.version", "type": "resource", "dataType": "string"}
+                                ],
+                                "expression": "A",
+                                "disabled": false
+                            }
+                        ]
+                    }
+                }
+            },
+            {
+                "id": "top-10-slowest-routes",
+                "title": "Top 10 Slowest Routes",
+                "description": "Slowest HTTP routes by p95 latency",
+                "panelTypes": "table",
+                "query": {
+                    "queryType": "builder",
+                    "builder": {
+                        "queryData": [
+                            {
+                                "dataSource": "traces",
+                                "queryName": "A",
+                                "aggregateOperator": "p95",
+                                "aggregateAttribute": {
+                                    "key": "duration_nano",
+                                    "type": "tag",
+                                    "dataType": "float64"
+                                },
+                                "groupBy": [
+                                    {"key": "service.name", "type": "resource", "dataType": "string"},
+                                    {"key": "http.route", "type": "tag", "dataType": "string"}
+                                ],
+                                "orderBy": [{"columnName": "value", "order": "desc"}],
+                                "limit": 10,
+                                "expression": "A",
+                                "disabled": false
+                            }
+                        ]
+                    }
+                }
+            },
+            {
+                "id": "failed-order-value",
+                "title": "💸 Failed Order Value",
+                "description": "sumIf(order.total, has_error=true) — total dollar value of failed orders",
+                "panelTypes": "value",
+                "query": {
+                    "queryType": "builder",
+                    "builder": {
+                        "queryData": [
+                            {
+                                "dataSource": "traces",
+                                "queryName": "A",
+                                "aggregateOperator": "sum",
+                                "aggregateAttribute": {
+                                    "key": "order.total",
+                                    "type": "tag",
+                                    "dataType": "float64"
+                                },
+                                "filters": {
+                                    "items": [
+                                        {
+                                            "key": {"key": "has_error", "type": "tag", "dataType": "bool"},
+                                            "op": "=",
+                                            "value": "true"
+                                        },
+                                        {
+                                            "key": {"key": "service.name", "type": "resource", "dataType": "string"},
+                                            "op": "=",
+                                            "value": "checkout"
+                                        }
+                                    ],
+                                    "op": "AND"
+                                },
+                                "expression": "A",
+                                "disabled": false
+                            }
+                        ]
+                    }
+                }
+            },
+            {
+                "id": "impacted-users",
+                "title": "👤 Impacted Users",
+                "description": "count_distinct(user.id) where has_error=true",
+                "panelTypes": "value",
+                "query": {
+                    "queryType": "builder",
+                    "builder": {
+                        "queryData": [
+                            {
+                                "dataSource": "traces",
+                                "queryName": "A",
+                                "aggregateOperator": "count_distinct",
+                                "aggregateAttribute": {
+                                    "key": "user.id",
+                                    "type": "tag",
+                                    "dataType": "string"
+                                },
+                                "filters": {
+                                    "items": [
+                                        {
+                                            "key": {"key": "has_error", "type": "tag", "dataType": "bool"},
+                                            "op": "=",
+                                            "value": "true"
+                                        }
+                                    ],
+                                    "op": "AND"
+                                },
+                                "expression": "A",
+                                "disabled": false
+                            }
+                        ]
+                    }
+                }
+            },
+            {
+                "id": "per-tenant-request-rate",
+                "title": "Request Rate by Tenant",
+                "description": "Per-tenant request rate with having count() > 100 to cut noise",
+                "panelTypes": "graph",
+                "query": {
+                    "queryType": "builder",
+                    "builder": {
+                        "queryData": [
+                            {
+                                "dataSource": "traces",
+                                "queryName": "A",
+                                "aggregateOperator": "rate",
+                                "aggregateAttribute": {
+                                    "key": "",
+                                    "type": "tag",
+                                    "dataType": "string"
+                                },
+                                "groupBy": [
+                                    {"key": "tenant.name", "type": "tag", "dataType": "string"}
+                                ],
+                                "having": [
+                                    {
+                                        "columnName": "value",
+                                        "op": ">",
+                                        "value": 100
+                                    }
+                                ],
+                                "expression": "A",
+                                "disabled": false
+                            }
+                        ]
+                    }
+                }
+            }
+        ]
+    }
+}

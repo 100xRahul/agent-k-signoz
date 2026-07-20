@@ -1,0 +1,53 @@
+{
+    "alert": "payment-timeouts",
+    "alertType": "TRACES_BASED_ALERT",
+    "ruleType": "threshold_rule",
+    "condition": {
+        "compositeQuery": {
+            "queryType": "builder",
+            "builderQueries": {
+                "A": {
+                    "dataSource": "traces",
+                    "queryName": "A",
+                    "aggregateOperator": "count",
+                    "aggregateAttribute": {
+                        "key": "",
+                        "type": "tag",
+                        "dataType": "string"
+                    },
+                    "filters": {
+                        "items": [
+                            {
+                                "key": {"key": "service.name", "type": "resource", "dataType": "string"},
+                                "op": "=",
+                                "value": "payment"
+                            },
+                            {
+                                "key": {"key": "has_error", "type": "tag", "dataType": "bool"},
+                                "op": "=",
+                                "value": "true"
+                            }
+                        ],
+                        "op": "AND"
+                    },
+                    "expression": "A",
+                    "disabled": false,
+                    "stepInterval": 60
+                }
+            }
+        },
+        "op": ">",
+        "target": 5,
+        "matchType": "1"
+    },
+    "evalWindow": "1m0s",
+    "labels": {
+        "severity": "critical",
+        "service": "payment",
+        "scenario": "pool-exhaustion"
+    },
+    "annotations": {
+        "summary": "Payment service timeout errors > 5/min",
+        "description": "The payment service is experiencing frequent timeout errors, possibly due to connection pool exhaustion."
+    }
+}
