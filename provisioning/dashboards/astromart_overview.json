@@ -2,31 +2,52 @@
     "data": {
         "title": "AstroMart Overview",
         "description": "Service health, error rates, latency, and business metrics for the AstroMart sandbox",
-        "tags": ["agent-k", "sandbox"],
+        "tags": [
+            "agent-k",
+            "sandbox"
+        ],
         "layout": [
             {
                 "i": "error-rate-by-service",
-                "x": 0, "y": 0, "w": 6, "h": 3
+                "x": 0,
+                "y": 0,
+                "w": 6,
+                "h": 3
             },
             {
                 "i": "p99-by-version",
-                "x": 6, "y": 0, "w": 6, "h": 3
+                "x": 6,
+                "y": 0,
+                "w": 6,
+                "h": 3
             },
             {
                 "i": "top-10-slowest-routes",
-                "x": 0, "y": 3, "w": 6, "h": 3
+                "x": 0,
+                "y": 3,
+                "w": 6,
+                "h": 3
             },
             {
                 "i": "failed-order-value",
-                "x": 6, "y": 3, "w": 6, "h": 3
+                "x": 6,
+                "y": 3,
+                "w": 6,
+                "h": 3
             },
             {
                 "i": "impacted-users",
-                "x": 0, "y": 6, "w": 6, "h": 3
+                "x": 0,
+                "y": 6,
+                "w": 6,
+                "h": 3
             },
             {
                 "i": "per-tenant-request-rate",
-                "x": 6, "y": 6, "w": 6, "h": 3
+                "x": 6,
+                "y": 6,
+                "w": 6,
+                "h": 3
             }
         ],
         "widgets": [
@@ -51,15 +72,37 @@
                                 "filters": {
                                     "items": [
                                         {
-                                            "key": {"key": "has_error", "type": "tag", "dataType": "bool"},
+                                            "key": {
+                                                "key": "has_error",
+                                                "type": "tag",
+                                                "dataType": "bool"
+                                            },
                                             "op": "=",
                                             "value": "true"
+                                        },
+                                        {
+                                            "key": {
+                                                "key": "service.name",
+                                                "type": "resource",
+                                                "dataType": "string"
+                                            },
+                                            "op": "in",
+                                            "value": [
+                                                "gateway",
+                                                "checkout",
+                                                "payment",
+                                                "inventory"
+                                            ]
                                         }
                                     ],
                                     "op": "AND"
                                 },
                                 "groupBy": [
-                                    {"key": "service.name", "type": "resource", "dataType": "string"}
+                                    {
+                                        "key": "service.name",
+                                        "type": "resource",
+                                        "dataType": "string"
+                                    }
                                 ],
                                 "expression": "A",
                                 "disabled": false
@@ -87,11 +130,27 @@
                                     "dataType": "float64"
                                 },
                                 "groupBy": [
-                                    {"key": "service.name", "type": "resource", "dataType": "string"},
-                                    {"key": "service.version", "type": "resource", "dataType": "string"}
+                                    {
+                                        "key": "service.version",
+                                        "type": "resource",
+                                        "dataType": "string"
+                                    }
                                 ],
                                 "expression": "A",
-                                "disabled": false
+                                "disabled": false,
+                                "filters": {
+                                    "items": [
+                                        {
+                                            "key": {
+                                                "key": "service.name",
+                                                "type": "resource",
+                                                "dataType": "string"
+                                            },
+                                            "op": "=",
+                                            "value": "checkout"
+                                        }
+                                    ]
+                                }
                             }
                         ]
                     }
@@ -116,13 +175,44 @@
                                     "dataType": "float64"
                                 },
                                 "groupBy": [
-                                    {"key": "service.name", "type": "resource", "dataType": "string"},
-                                    {"key": "http.route", "type": "tag", "dataType": "string"}
+                                    {
+                                        "key": "service.name",
+                                        "type": "resource",
+                                        "dataType": "string"
+                                    },
+                                    {
+                                        "key": "http.route",
+                                        "type": "tag",
+                                        "dataType": "string"
+                                    }
                                 ],
-                                "orderBy": [{"columnName": "value", "order": "desc"}],
+                                "orderBy": [
+                                    {
+                                        "columnName": "value",
+                                        "order": "desc"
+                                    }
+                                ],
                                 "limit": 10,
                                 "expression": "A",
-                                "disabled": false
+                                "disabled": false,
+                                "filters": {
+                                    "items": [
+                                        {
+                                            "key": {
+                                                "key": "service.name",
+                                                "type": "resource",
+                                                "dataType": "string"
+                                            },
+                                            "op": "in",
+                                            "value": [
+                                                "gateway",
+                                                "checkout",
+                                                "payment",
+                                                "inventory"
+                                            ]
+                                        }
+                                    ]
+                                }
                             }
                         ]
                     }
@@ -130,8 +220,8 @@
             },
             {
                 "id": "failed-order-value",
-                "title": "💸 Failed Order Value",
-                "description": "sumIf(order.total, has_error=true) — total dollar value of failed orders",
+                "title": "\ud83d\udcb8 Failed Order Value",
+                "description": "sumIf(order.total, has_error=true) \u2014 total dollar value of failed orders",
                 "panelTypes": "value",
                 "query": {
                     "queryType": "builder",
@@ -149,12 +239,20 @@
                                 "filters": {
                                     "items": [
                                         {
-                                            "key": {"key": "has_error", "type": "tag", "dataType": "bool"},
+                                            "key": {
+                                                "key": "has_error",
+                                                "type": "tag",
+                                                "dataType": "bool"
+                                            },
                                             "op": "=",
                                             "value": "true"
                                         },
                                         {
-                                            "key": {"key": "service.name", "type": "resource", "dataType": "string"},
+                                            "key": {
+                                                "key": "service.name",
+                                                "type": "resource",
+                                                "dataType": "string"
+                                            },
                                             "op": "=",
                                             "value": "checkout"
                                         }
@@ -170,7 +268,7 @@
             },
             {
                 "id": "impacted-users",
-                "title": "👤 Impacted Users",
+                "title": "\ud83d\udc64 Impacted Users",
                 "description": "count_distinct(user.id) where has_error=true",
                 "panelTypes": "value",
                 "query": {
@@ -189,7 +287,11 @@
                                 "filters": {
                                     "items": [
                                         {
-                                            "key": {"key": "has_error", "type": "tag", "dataType": "bool"},
+                                            "key": {
+                                                "key": "has_error",
+                                                "type": "tag",
+                                                "dataType": "bool"
+                                            },
                                             "op": "=",
                                             "value": "true"
                                         }
@@ -222,17 +324,34 @@
                                     "dataType": "string"
                                 },
                                 "groupBy": [
-                                    {"key": "tenant.name", "type": "tag", "dataType": "string"}
+                                    {
+                                        "key": "tenant.name",
+                                        "type": "tag",
+                                        "dataType": "string"
+                                    }
                                 ],
                                 "having": [
                                     {
                                         "columnName": "value",
                                         "op": ">",
-                                        "value": 100
+                                        "value": 0.01
                                     }
                                 ],
                                 "expression": "A",
-                                "disabled": false
+                                "disabled": false,
+                                "filters": {
+                                    "items": [
+                                        {
+                                            "key": {
+                                                "key": "service.name",
+                                                "type": "resource",
+                                                "dataType": "string"
+                                            },
+                                            "op": "=",
+                                            "value": "checkout"
+                                        }
+                                    ]
+                                }
                             }
                         ]
                     }
