@@ -163,6 +163,7 @@ def llm_call_span(
         "llm.call",
         attributes={
             "gen_ai.system": system,
+            "gen_ai.operation.name": "chat",
             "gen_ai.request.model": model,
         },
     ) as span:
@@ -175,9 +176,11 @@ def set_llm_usage(
     output_tokens: int,
     cost_usd: float,
 ) -> None:
-    """Set usage attributes on an LLM call span."""
+    """Set usage attributes on an LLM call span (gen_ai semconv + total, which
+    SigNoz's LLM examples/dashboards key on)."""
     span.set_attribute("gen_ai.usage.input_tokens", input_tokens)
     span.set_attribute("gen_ai.usage.output_tokens", output_tokens)
+    span.set_attribute("gen_ai.usage.total_tokens", input_tokens + output_tokens)
     span.set_attribute("llm.cost.usd", cost_usd)
 
 

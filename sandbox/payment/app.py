@@ -123,7 +123,6 @@ async def pay(request: Request) -> JSONResponse:
                 finally:
                     await pg_pool.release(conn)
             except Exception as exc:
-                span.set_attribute("has_error", True)
                 span.set_status(
                     trace.StatusCode.ERROR,
                     "pool exhaustion: timeout acquiring connection",
@@ -162,7 +161,6 @@ async def pay(request: Request) -> JSONResponse:
                     tenant,
                 )
         except Exception as exc:
-            span.set_attribute("has_error", True)
             span.set_status(trace.StatusCode.ERROR, str(exc))
             logger.error(
                 json.dumps(

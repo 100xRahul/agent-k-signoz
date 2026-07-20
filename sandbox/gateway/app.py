@@ -8,6 +8,7 @@ from typing import Any
 
 import httpx
 from fastapi import FastAPI, Request, Response
+from opentelemetry import trace
 
 from telemetry import setup_telemetry
 
@@ -33,7 +34,9 @@ async def api_checkout(request: Request) -> dict[str, Any]:
             resp = await client.post(f"{CHECKOUT_URL}/checkout", json=body)
 
         if resp.status_code >= 400:
-            span.set_attribute("has_error", True)
+            span.set_status(
+                trace.StatusCode.ERROR, f"downstream returned {resp.status_code}"
+            )
             return Response(
                 content=resp.content,
                 status_code=resp.status_code,

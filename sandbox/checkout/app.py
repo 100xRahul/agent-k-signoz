@@ -124,7 +124,6 @@ async def checkout(request: Request) -> JSONResponse:
             await asyncio.sleep(0.8)
             # Fail 35% of orders
             if random.random() < 0.35:
-                span.set_attribute("has_error", True)
                 span.set_status(trace.StatusCode.ERROR, "bad-deploy: simulated failure")
                 logger.error(
                     json.dumps(
@@ -152,7 +151,6 @@ async def checkout(request: Request) -> JSONResponse:
             span.set_attribute("chaos.scenario", "flag-combo")
             if "new-checkout" in feature_flags and "express-pay" in feature_flags:
                 if random.random() < 0.25:
-                    span.set_attribute("has_error", True)
                     span.set_status(
                         trace.StatusCode.ERROR,
                         "flag-combo: new-checkout + express-pay conflict",
@@ -191,7 +189,6 @@ async def checkout(request: Request) -> JSONResponse:
             )
 
         if pay_resp.status_code >= 400:
-            span.set_attribute("has_error", True)
             span.set_status(trace.StatusCode.ERROR, "payment failed")
             logger.error(
                 json.dumps(
@@ -219,7 +216,6 @@ async def checkout(request: Request) -> JSONResponse:
             )
 
         if reserve_resp.status_code >= 400:
-            span.set_attribute("has_error", True)
             span.set_status(trace.StatusCode.ERROR, "inventory reserve failed")
 
         # ── Success log ────────────────────────────────────────
