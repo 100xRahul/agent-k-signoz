@@ -125,7 +125,9 @@ Note `preferredChannels` takes channel *names*, not IDs — the server folds the
 
 **Gotcha #3: `POST /api/v1/dashboards` wants the dashboard content directly.** I exported a dashboard, saved it as `{"data": {...}}`, and POSTed the whole file. The API happily returned success — and stored a broken, title-less dashboard with my payload double-nested inside. No error, just quiet corruption. Unwrap the file and send the inner object (title, widgets, …). If your dashboard list ever shows untitled entries, this is why.
 
-The payoff: `make provision` takes a virgin SigNoz to fully-armed — channels, alerts, dashboards — in about four seconds, idempotently. Trigger a bad deploy in the sandbox and the checkout-error-rate alert fires and webhooks out about three minutes later, evaluation delay included.
+The payoff: `make provision` takes a virgin SigNoz to fully-armed — channels, alerts, dashboards — in about four seconds, idempotently. Trigger a bad deploy in the sandbox and the checkout-error-rate alert fires and webhooks out about three minutes later.
+
+Why three minutes and not one? I stared at "inactive" rules long enough to go read the server logs: every evaluation logs `eval_delay: 120000`. Threshold rules deliberately evaluate a window ending **two minutes in the past**, so late-arriving spans can't cause false negatives — my 1-minute window at 11:08 was scoring traffic from 11:05–11:06, before the incident started. Once you know that, "my alert is slow" becomes "my alert is correct"; budget for `eval window + 2m` in any latency math you do.
 
 [SCREENSHOT: Alerts page with the five provisioned rules, checkout-error-rate in FIRING state]
 
