@@ -28,7 +28,9 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger("chaos")
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://sandbox-redis:6379")
-OTEL_ENDPOINT = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://signoz-otel-collector:4317")
+OTEL_ENDPOINT = os.getenv(
+    "OTEL_EXPORTER_OTLP_ENDPOINT", "http://signoz-otel-collector:4317"
+)
 
 BASELINE_VERSION = "1.4.1"
 BAD_VERSION = "1.4.2"
@@ -41,7 +43,9 @@ def _redis_client() -> redis.Redis:
     return redis.from_url(REDIS_URL, decode_responses=True)
 
 
-def _emit_deployment_marker(service: str, version: str, event: str = "deployment") -> None:
+def _emit_deployment_marker(
+    service: str, version: str, event: str = "deployment"
+) -> None:
     """Emit a deployment/rollback marker log line via OTLP.
 
     Uses the OTel SDK directly to send a single log record from service.name=deploy-bot.
@@ -66,12 +70,14 @@ def _emit_deployment_marker(service: str, version: str, event: str = "deployment
         deploy_logger.setLevel(logging.INFO)
 
         deploy_logger.info(
-            json.dumps({
-                "event": event,
-                "service": service,
-                "version": version,
-                "timestamp": time.time(),
-            })
+            json.dumps(
+                {
+                    "event": event,
+                    "service": service,
+                    "version": version,
+                    "timestamp": time.time(),
+                }
+            )
         )
 
         # Flush to ensure the log is sent
@@ -111,14 +117,18 @@ def trigger_flag_combo() -> None:
     """Trigger the flag-combo scenario."""
     r = _redis_client()
     r.set("chaos:flag-combo", "1")
-    logger.info("🔥 flag-combo scenario ACTIVE – new-checkout + express-pay = 25%% failure")
+    logger.info(
+        "🔥 flag-combo scenario ACTIVE – new-checkout + express-pay = 25%% failure"
+    )
 
 
 def trigger_secret_leak() -> None:
     """Trigger the secret-leak scenario."""
     r = _redis_client()
     r.set("chaos:secret-leak", "1")
-    logger.info("🔥 secret-leak scenario ACTIVE – fake AKIA keys appearing in payment logs")
+    logger.info(
+        "🔥 secret-leak scenario ACTIVE – fake AKIA keys appearing in payment logs"
+    )
 
 
 def resolve_all() -> None:
@@ -130,9 +140,13 @@ def resolve_all() -> None:
         logger.info("Cleared chaos:%s", flag)
 
     r.set("chaos:checkout-version", BASELINE_VERSION)
-    _emit_deployment_marker(service="checkout", version=BASELINE_VERSION, event="rollback")
+    _emit_deployment_marker(
+        service="checkout", version=BASELINE_VERSION, event="rollback"
+    )
 
-    logger.info("✅ All chaos scenarios RESOLVED – checkout restored to v%s", BASELINE_VERSION)
+    logger.info(
+        "✅ All chaos scenarios RESOLVED – checkout restored to v%s", BASELINE_VERSION
+    )
 
 
 DISPATCH: dict[str, callable] = {

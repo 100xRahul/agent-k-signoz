@@ -113,6 +113,7 @@ def _extract_alertname(trigger_json: str) -> str:
     """Extract alertname from trigger JSON."""
     try:
         import json
+
         data = json.loads(trigger_json)
         return data.get("alertname", "unknown")
     except (json.JSONDecodeError, TypeError):

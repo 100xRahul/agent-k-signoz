@@ -2,52 +2,40 @@
     "alert": "payment-timeouts",
     "alertType": "TRACES_BASED_ALERT",
     "ruleType": "threshold_rule",
+    "version": "v5",
+    "evalWindow": "1m",
+    "frequency": "1m",
     "condition": {
         "compositeQuery": {
             "queryType": "builder",
-            "builderQueries": {
-                "A": {
-                    "dataSource": "traces",
-                    "queryName": "A",
-                    "aggregateOperator": "count",
-                    "aggregateAttribute": {
-                        "key": "",
-                        "type": "tag",
-                        "dataType": "string"
-                    },
-                    "filters": {
-                        "items": [
-                            {
-                                "key": {"key": "service.name", "type": "resource", "dataType": "string"},
-                                "op": "=",
-                                "value": "payment"
-                            },
-                            {
-                                "key": {"key": "has_error", "type": "tag", "dataType": "bool"},
-                                "op": "=",
-                                "value": "true"
-                            }
+            "panelType": "graph",
+            "queries": [
+                {
+                    "type": "builder_query",
+                    "spec": {
+                        "name": "A",
+                        "signal": "traces",
+                        "stepInterval": "60s",
+                        "aggregations": [
+                            {"expression": "count()", "alias": "timeout_errors"}
                         ],
-                        "op": "AND"
-                    },
-                    "expression": "A",
-                    "disabled": false,
-                    "stepInterval": 60
+                        "filter": {"expression": "service.name = 'payment' AND has_error = true"}
+                    }
                 }
-            }
+            ]
         },
-        "op": ">",
+        "op": "above",
         "target": 5,
-        "matchType": "1"
+        "matchType": "at_least_once",
+        "selectedQueryName": "A"
     },
-    "evalWindow": "1m0s",
     "labels": {
         "severity": "critical",
         "service": "payment",
         "scenario": "pool-exhaustion"
     },
     "annotations": {
-        "summary": "Payment service timeout errors > 5/min",
-        "description": "The payment service is experiencing frequent timeout errors, possibly due to connection pool exhaustion."
+        "summary": "Payment errors exceed 5/min",
+        "description": "The payment service is timing out or erroring, possibly due to database connection pool exhaustion."
     }
 }

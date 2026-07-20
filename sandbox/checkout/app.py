@@ -45,6 +45,7 @@ async def _shutdown() -> None:
 
 # ── Chaos helpers ──────────────────────────────────────────────────
 
+
 async def _redis_flag(flag: str) -> bool:
     """Return True if a Redis chaos flag is set."""
     if redis_client is None:
@@ -76,6 +77,7 @@ async def _current_version() -> str:
 
 
 # ── Main endpoint ─────────────────────────────────────────────────
+
 
 @app.post("/checkout")
 async def checkout(request: Request) -> JSONResponse:
@@ -111,19 +113,24 @@ async def checkout(request: Request) -> JSONResponse:
                 span.set_attribute("has_error", True)
                 span.set_status(trace.StatusCode.ERROR, "bad-deploy: simulated failure")
                 logger.error(
-                    json.dumps({
-                        "event": "order_processed",
-                        "order_id": order_id,
-                        "retry_count": retry_count,
-                        "consumer_group": "orders-cg",
-                        "status": "error",
-                        "error": "internal checkout failure (bad-deploy)",
-                        "service_version": version,
-                    })
+                    json.dumps(
+                        {
+                            "event": "order_processed",
+                            "order_id": order_id,
+                            "retry_count": retry_count,
+                            "consumer_group": "orders-cg",
+                            "status": "error",
+                            "error": "internal checkout failure (bad-deploy)",
+                            "service_version": version,
+                        }
+                    )
                 )
                 return JSONResponse(
                     status_code=500,
-                    content={"error": "internal checkout failure", "order_id": order_id},
+                    content={
+                        "error": "internal checkout failure",
+                        "order_id": order_id,
+                    },
                 )
 
         # ── Chaos: flag-combo ──────────────────────────────────
@@ -137,15 +144,17 @@ async def checkout(request: Request) -> JSONResponse:
                         "flag-combo: new-checkout + express-pay conflict",
                     )
                     logger.error(
-                        json.dumps({
-                            "event": "order_processed",
-                            "order_id": order_id,
-                            "retry_count": retry_count,
-                            "consumer_group": "orders-cg",
-                            "status": "error",
-                            "error": "feature flag conflict: new-checkout + express-pay",
-                            "service_version": version,
-                        })
+                        json.dumps(
+                            {
+                                "event": "order_processed",
+                                "order_id": order_id,
+                                "retry_count": retry_count,
+                                "consumer_group": "orders-cg",
+                                "status": "error",
+                                "error": "feature flag conflict: new-checkout + express-pay",
+                                "service_version": version,
+                            }
+                        )
                     )
                     return JSONResponse(
                         status_code=500,
@@ -171,15 +180,17 @@ async def checkout(request: Request) -> JSONResponse:
             span.set_attribute("has_error", True)
             span.set_status(trace.StatusCode.ERROR, "payment failed")
             logger.error(
-                json.dumps({
-                    "event": "order_processed",
-                    "order_id": order_id,
-                    "retry_count": retry_count,
-                    "consumer_group": "orders-cg",
-                    "status": "error",
-                    "error": f"payment service returned {pay_resp.status_code}",
-                    "service_version": version,
-                })
+                json.dumps(
+                    {
+                        "event": "order_processed",
+                        "order_id": order_id,
+                        "retry_count": retry_count,
+                        "consumer_group": "orders-cg",
+                        "status": "error",
+                        "error": f"payment service returned {pay_resp.status_code}",
+                        "service_version": version,
+                    }
+                )
             )
             return JSONResponse(
                 status_code=pay_resp.status_code,
@@ -199,17 +210,19 @@ async def checkout(request: Request) -> JSONResponse:
 
         # ── Success log ────────────────────────────────────────
         logger.info(
-            json.dumps({
-                "event": "order_processed",
-                "order_id": order_id,
-                "retry_count": retry_count,
-                "consumer_group": "orders-cg",
-                "status": "success",
-                "total": total,
-                "user_id": user_id,
-                "tenant": tenant,
-                "service_version": version,
-            })
+            json.dumps(
+                {
+                    "event": "order_processed",
+                    "order_id": order_id,
+                    "retry_count": retry_count,
+                    "consumer_group": "orders-cg",
+                    "status": "success",
+                    "total": total,
+                    "user_id": user_id,
+                    "tenant": tenant,
+                    "service_version": version,
+                }
+            )
         )
 
         return JSONResponse(

@@ -1,36 +1,43 @@
 {
     "alert": "agentk-budget-spike",
-    "alertType": "METRICS_BASED_ALERT",
+    "alertType": "METRIC_BASED_ALERT",
     "ruleType": "threshold_rule",
+    "version": "v5",
+    "evalWindow": "5m",
+    "frequency": "1m",
     "condition": {
         "compositeQuery": {
             "queryType": "builder",
-            "builderQueries": {
-                "A": {
-                    "dataSource": "metrics",
-                    "queryName": "A",
-                    "aggregateOperator": "rate",
-                    "aggregateAttribute": {
-                        "key": "agentk.cost.usd",
-                        "type": "Sum"
-                    },
-                    "expression": "A",
-                    "disabled": false,
-                    "stepInterval": 60
+            "panelType": "graph",
+            "queries": [
+                {
+                    "type": "builder_query",
+                    "spec": {
+                        "name": "A",
+                        "signal": "metrics",
+                        "stepInterval": "60s",
+                        "aggregations": [
+                            {
+                                "metricName": "agentk.cost.usd",
+                                "timeAggregation": "rate",
+                                "spaceAggregation": "sum"
+                            }
+                        ]
+                    }
                 }
-            }
+            ]
         },
-        "op": ">",
-        "target": 2.0,
-        "matchType": "1"
+        "op": "above",
+        "target": 0.00056,
+        "matchType": "at_least_once",
+        "selectedQueryName": "A"
     },
-    "evalWindow": "5m0s",
     "labels": {
         "severity": "warning",
         "service": "agent-k"
     },
     "annotations": {
-        "summary": "Agent K LLM cost exceeds $2/hour budget",
-        "description": "Agent K's LLM spending rate has exceeded the $2/hour budget threshold. The agent may be stuck in a loop or investigating too aggressively."
+        "summary": "Agent K LLM spend exceeds $2/hour",
+        "description": "Agent K's LLM cost rate (agentk.cost.usd counter, in $/s) crossed the $2/hour budget. If Agent K investigates this one, it is investigating itself."
     }
 }

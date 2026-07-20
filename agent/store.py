@@ -87,8 +87,14 @@ class Store:
         if not kwargs:
             return
         allowed = {
-            "status", "finished_at", "report_md", "root_cause",
-            "cost_usd", "tokens_in", "tokens_out", "trace_id",
+            "status",
+            "finished_at",
+            "report_md",
+            "root_cause",
+            "cost_usd",
+            "tokens_in",
+            "tokens_out",
+            "trace_id",
         }
         fields = {k: v for k, v in kwargs.items() if k in allowed}
         if not fields:

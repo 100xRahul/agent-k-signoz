@@ -59,7 +59,9 @@ def setup_telemetry(app: Any | None = None) -> None:
 
     # ── Metrics ───────────────────────────────────────────────────
     metric_exporter = OTLPMetricExporter()
-    metric_reader = PeriodicExportingMetricReader(metric_exporter, export_interval_millis=15000)
+    metric_reader = PeriodicExportingMetricReader(
+        metric_exporter, export_interval_millis=15000
+    )
     meter_provider = MeterProvider(resource=resource, metric_readers=[metric_reader])
     metrics.set_meter_provider(meter_provider)
 

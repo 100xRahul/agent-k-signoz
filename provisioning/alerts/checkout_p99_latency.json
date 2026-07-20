@@ -2,49 +2,40 @@
     "alert": "checkout-p99-latency",
     "alertType": "TRACES_BASED_ALERT",
     "ruleType": "threshold_rule",
+    "version": "v5",
+    "evalWindow": "1m",
+    "frequency": "1m",
     "condition": {
         "compositeQuery": {
             "queryType": "builder",
-            "builderQueries": {
-                "A": {
-                    "dataSource": "traces",
-                    "queryName": "A",
-                    "aggregateOperator": "p99",
-                    "aggregateAttribute": {
-                        "key": "duration_nano",
-                        "type": "tag",
-                        "dataType": "float64"
-                    },
-                    "filters": {
-                        "items": [
-                            {
-                                "key": {"key": "service.name", "type": "resource", "dataType": "string"},
-                                "op": "=",
-                                "value": "checkout"
-                            }
+            "panelType": "graph",
+            "queries": [
+                {
+                    "type": "builder_query",
+                    "spec": {
+                        "name": "A",
+                        "signal": "traces",
+                        "stepInterval": "60s",
+                        "aggregations": [
+                            {"expression": "p99(duration_nano)", "alias": "p99_latency"}
                         ],
-                        "op": "AND"
-                    },
-                    "groupBy": [
-                        {"key": "service.name", "type": "resource", "dataType": "string"}
-                    ],
-                    "expression": "A",
-                    "disabled": false,
-                    "stepInterval": 60
+                        "filter": {"expression": "service.name = 'checkout'"}
+                    }
                 }
-            }
+            ]
         },
-        "op": ">",
+        "op": "above",
         "target": 1500000000,
-        "matchType": "1"
+        "matchType": "at_least_once",
+        "selectedQueryName": "A"
     },
-    "evalWindow": "1m0s",
     "labels": {
         "severity": "warning",
-        "service": "checkout"
+        "service": "checkout",
+        "scenario": "bad-deploy"
     },
     "annotations": {
-        "summary": "Checkout P99 latency exceeds 1.5s",
-        "description": "The checkout service P99 latency has spiked above 1.5 seconds."
+        "summary": "Checkout p99 latency exceeds 1.5s",
+        "description": "The checkout service p99 latency is above 1.5 seconds, indicating a performance regression."
     }
 }

@@ -22,7 +22,9 @@ app = FastAPI(title="payment")
 tracer = setup_telemetry(app)
 logger = logging.getLogger("payment")
 
-PG_DSN = os.getenv("PG_DSN", "postgresql://payments:payments123@localhost:5432/payments")
+PG_DSN = os.getenv(
+    "PG_DSN", "postgresql://payments:payments123@localhost:5432/payments"
+)
 POOL_SIZE = int(os.getenv("POOL_SIZE", "10"))
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 
@@ -99,13 +101,15 @@ async def pay(request: Request) -> JSONResponse:
                 "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
             )
             logger.error(
-                json.dumps({
-                    "event": "payment_error",
-                    "order_id": order_id,
-                    "error": f"Auth failed for key={fake_key} jwt={fake_jwt}",
-                    "aws_access_key_id": fake_key,
-                    "token": fake_jwt,
-                })
+                json.dumps(
+                    {
+                        "event": "payment_error",
+                        "order_id": order_id,
+                        "error": f"Auth failed for key={fake_key} jwt={fake_jwt}",
+                        "aws_access_key_id": fake_key,
+                        "token": fake_jwt,
+                    }
+                )
             )
 
         # ── Chaos: pool-exhaustion ─────────────────────────────
@@ -120,17 +124,25 @@ async def pay(request: Request) -> JSONResponse:
                     await pg_pool.release(conn)
             except Exception as exc:
                 span.set_attribute("has_error", True)
-                span.set_status(trace.StatusCode.ERROR, "pool exhaustion: timeout acquiring connection")
+                span.set_status(
+                    trace.StatusCode.ERROR,
+                    "pool exhaustion: timeout acquiring connection",
+                )
                 logger.error(
-                    json.dumps({
-                        "event": "payment_error",
-                        "order_id": order_id,
-                        "error": f"connection pool exhausted: {exc}",
-                    })
+                    json.dumps(
+                        {
+                            "event": "payment_error",
+                            "order_id": order_id,
+                            "error": f"connection pool exhausted: {exc}",
+                        }
+                    )
                 )
                 return JSONResponse(
                     status_code=503,
-                    content={"error": "connection pool exhausted", "order_id": order_id},
+                    content={
+                        "error": "connection pool exhausted",
+                        "order_id": order_id,
+                    },
                 )
 
         # ── Simulated work (30–80ms) ──────────────────────────
@@ -153,11 +165,13 @@ async def pay(request: Request) -> JSONResponse:
             span.set_attribute("has_error", True)
             span.set_status(trace.StatusCode.ERROR, str(exc))
             logger.error(
-                json.dumps({
-                    "event": "payment_error",
-                    "order_id": order_id,
-                    "error": str(exc),
-                })
+                json.dumps(
+                    {
+                        "event": "payment_error",
+                        "order_id": order_id,
+                        "error": str(exc),
+                    }
+                )
             )
             return JSONResponse(
                 status_code=500,
@@ -165,13 +179,15 @@ async def pay(request: Request) -> JSONResponse:
             )
 
         logger.info(
-            json.dumps({
-                "event": "payment_processed",
-                "order_id": order_id,
-                "amount": amount,
-                "user_id": user_id,
-                "tenant": tenant,
-            })
+            json.dumps(
+                {
+                    "event": "payment_processed",
+                    "order_id": order_id,
+                    "amount": amount,
+                    "user_id": user_id,
+                    "tenant": tenant,
+                }
+            )
         )
 
         return JSONResponse(

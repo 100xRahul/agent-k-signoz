@@ -12,10 +12,14 @@ from config import settings
 
 logger = logging.getLogger(__name__)
 
-# ── Curated allowlist of MCP tools (10 tools) ────────────────────
+# ── Curated allowlist of MCP tools ───────────────────────────────
+# Read-only investigation tools. The discovery tools (field keys/values,
+# top operations) let the agent adapt to systems whose attribute schema it
+# has never seen, instead of assuming any particular instrumentation.
 
 TOOL_ALLOWLIST: set[str] = {
     "signoz_list_services",
+    "signoz_get_service_top_operations",
     "signoz_aggregate_traces",
     "signoz_search_traces",
     "signoz_get_trace_details",
@@ -23,6 +27,9 @@ TOOL_ALLOWLIST: set[str] = {
     "signoz_aggregate_logs",
     "signoz_query_metrics",
     "signoz_execute_builder_query",
+    "signoz_get_field_keys",
+    "signoz_get_field_values",
+    "signoz_list_alerts",
     "signoz_get_alert",
     "signoz_get_alert_history",
 }
@@ -42,32 +49,29 @@ class MCPClient:
             return self._tools_cache
 
         tools: list[dict[str, Any]] = []
-        try:
-            async with streamablehttp_client(self._mcp_url) as (read, write, _):
-                async with ClientSession(read, write) as session:
-                    await session.initialize()
-                    result = await session.list_tools()
+        # No exception swallowing: if the MCP server is down the caller must
+        # know — a silent empty tool list would fake a working agent.
+        async with streamablehttp_client(self._mcp_url) as (read, write, _):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                result = await session.list_tools()
 
-                    for tool in result.tools:
-                        if tool.name in TOOL_ALLOWLIST:
-                            schema = {
-                                "name": tool.name,
-                                "description": tool.description or "",
-                                "input_schema": (
-                                    tool.inputSchema
-                                    if isinstance(tool.inputSchema, dict)
-                                    else {}
-                                ),
-                            }
-                            tools.append(schema)
-                            self._tool_schemas[tool.name] = schema
+                for tool in result.tools:
+                    if tool.name in TOOL_ALLOWLIST:
+                        schema = {
+                            "name": tool.name,
+                            "description": tool.description or "",
+                            "input_schema": (
+                                tool.inputSchema
+                                if isinstance(tool.inputSchema, dict)
+                                else {}
+                            ),
+                        }
+                        tools.append(schema)
+                        self._tool_schemas[tool.name] = schema
 
-            self._tools_cache = tools
-            logger.info("Loaded %d MCP tools (filtered from allowlist)", len(tools))
-        except Exception:
-            logger.exception("Failed to list MCP tools")
-            self._tools_cache = []
-
+        self._tools_cache = tools
+        logger.info("Loaded %d MCP tools (filtered from allowlist)", len(tools))
         return self._tools_cache
 
     async def call_tool(self, name: str, args: dict[str, Any]) -> str:

@@ -14,9 +14,13 @@ import httpx
 import time
 from pathlib import Path
 
-SIGNOZ_URL = os.environ.get("SIGNOZ_INTERNAL_URL", os.environ.get("SIGNOZ_URL", "http://signoz:8080"))
+SIGNOZ_URL = os.environ.get(
+    "SIGNOZ_INTERNAL_URL", os.environ.get("SIGNOZ_URL", "http://signoz:8080")
+)
 SIGNOZ_API_KEY = os.environ.get("SIGNOZ_API_KEY", "")
-AGENT_WEBHOOK_URL = os.environ.get("AGENT_WEBHOOK_URL", "http://agent:9000/webhook/signoz")
+AGENT_WEBHOOK_URL = os.environ.get(
+    "AGENT_WEBHOOK_URL", "http://agent:9000/webhook/signoz"
+)
 SLACK_WEBHOOK_URL = os.environ.get("SLACK_WEBHOOK_URL", "")
 
 HEADERS = {
@@ -40,58 +44,74 @@ def api(method: str, path: str, body: dict | None = None) -> dict:
         return {}
 
 
-def provision_notification_channels() -> dict[str, int]:
-    """Create or find notification channels. Returns name→id mapping."""
+def provision_notification_channels() -> list[str]:
+    """Create or find notification channels. Returns channel names (alert rules
+    reference channels by name, not id)."""
     print("📡 Provisioning notification channels...")
 
     existing = api("GET", "/channels")
-    channel_map: dict[str, int] = {}
-
+    existing_names: set[str] = set()
     if existing and "data" in existing:
         for ch in existing["data"]:
-            channel_map[ch["name"]] = ch["id"]
+            existing_names.add(ch["name"])
 
-    # Agent K webhook channel
-    if "agent-k-webhook" not in channel_map:
-        result = api("POST", "/channels", {
-            "name": "agent-k-webhook",
-            "type": "webhook",
-            "webhook_configs": [{
-                "api_url": AGENT_WEBHOOK_URL,
-                "send_resolved": True,
-            }],
-        })
-        if result and "data" in result:
-            channel_map["agent-k-webhook"] = result["data"]["id"]
+    channels: list[str] = []
+
+    # Agent K webhook channel (receiver configs follow Alertmanager schema)
+    if "agent-k-webhook" not in existing_names:
+        result = api(
+            "POST",
+            "/channels",
+            {
+                "name": "agent-k-webhook",
+                "type": "webhook",
+                "webhook_configs": [
+                    {
+                        "url": AGENT_WEBHOOK_URL,
+                        "send_resolved": True,
+                    }
+                ],
+            },
+        )
+        if result:
             print("  ✅ Created agent-k-webhook channel")
+            channels.append("agent-k-webhook")
         else:
             print("  ⚠️  Failed to create agent-k-webhook channel")
     else:
         print("  ✔️  agent-k-webhook channel already exists")
+        channels.append("agent-k-webhook")
 
     # Slack channel (if configured)
-    if SLACK_WEBHOOK_URL and "agent-k-slack" not in channel_map:
-        result = api("POST", "/channels", {
-            "name": "agent-k-slack",
-            "type": "slack",
-            "slack_configs": [{
-                "api_url": SLACK_WEBHOOK_URL,
-                "send_resolved": True,
-                "channel": "#agent-k",
-            }],
-        })
-        if result and "data" in result:
-            channel_map["agent-k-slack"] = result["data"]["id"]
+    if SLACK_WEBHOOK_URL and "agent-k-slack" not in existing_names:
+        result = api(
+            "POST",
+            "/channels",
+            {
+                "name": "agent-k-slack",
+                "type": "slack",
+                "slack_configs": [
+                    {
+                        "api_url": SLACK_WEBHOOK_URL,
+                        "send_resolved": True,
+                        "channel": "#agent-k",
+                    }
+                ],
+            },
+        )
+        if result:
             print("  ✅ Created agent-k-slack channel")
+            channels.append("agent-k-slack")
         else:
             print("  ⚠️  Failed to create agent-k-slack channel")
     elif SLACK_WEBHOOK_URL:
         print("  ✔️  agent-k-slack channel already exists")
+        channels.append("agent-k-slack")
 
-    return channel_map
+    return channels
 
 
-def provision_alerts(channel_ids: list[int]) -> None:
+def provision_alerts(channel_names: list[str]) -> None:
     """Provision alert rules from JSON files."""
     print("\n🚨 Provisioning alert rules...")
 
@@ -112,12 +132,13 @@ def provision_alerts(channel_ids: list[int]) -> None:
 
         alert_name = alert_def.get("alert", alert_file.stem)
 
-        # Inject notification channel IDs
+        # Inject notification channels (referenced by name); the rule API folds
+        # these into condition.thresholds receivers.
         if "preferredChannels" not in alert_def:
             alert_def["preferredChannels"] = []
-        for ch_id in channel_ids:
-            if ch_id not in alert_def["preferredChannels"]:
-                alert_def["preferredChannels"].append(str(ch_id))
+        for ch_name in channel_names:
+            if ch_name not in alert_def["preferredChannels"]:
+                alert_def["preferredChannels"].append(ch_name)
 
         if alert_name in existing_names:
             print(f"  ✔️  Alert '{alert_name}' already exists")
@@ -142,7 +163,8 @@ def provision_dashboards() -> None:
     existing_titles: set[str] = set()
     if existing and "data" in existing:
         for dash in existing["data"]:
-            title = dash.get("data", {}).get("title", "")
+            stored = dash.get("data") or {}
+            title = stored.get("title", "")
             if title:
                 existing_titles.add(title)
 
@@ -150,12 +172,15 @@ def provision_dashboards() -> None:
         with open(dash_file) as f:
             dash_def = json.load(f)
 
-        title = dash_def.get("data", {}).get("title", dash_file.stem)
+        # Dashboard files may wrap the content in {"data": {...}}; the API
+        # expects the dashboard content itself (title, widgets, ...).
+        content = dash_def.get("data", dash_def)
+        title = content.get("title", dash_file.stem)
 
         if title in existing_titles:
             print(f"  ✔️  Dashboard '{title}' already exists")
         else:
-            result = api("POST", "/dashboards", dash_def)
+            result = api("POST", "/dashboards", content)
             if result:
                 print(f"  ✅ Created dashboard '{title}'")
             else:
@@ -182,10 +207,9 @@ def main() -> None:
     else:
         print("❌ SigNoz not reachable. Provisioning may fail.\n")
 
-    channel_map = provision_notification_channels()
-    channel_ids = list(channel_map.values())
+    channel_names = provision_notification_channels()
 
-    provision_alerts(channel_ids)
+    provision_alerts(channel_names)
     provision_dashboards()
 
     print("\n✅ Provisioning complete!")

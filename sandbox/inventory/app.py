@@ -42,12 +42,15 @@ async def _startup() -> None:
     # Seed product catalog into Redis
     for product in SEED_PRODUCTS:
         key = f"product:{product['sku']}"
-        await redis_client.hset(key, mapping={
-            "sku": product["sku"],
-            "name": product["name"],
-            "price": str(product["price"]),
-            "stock": str(product["stock"]),
-        })
+        await redis_client.hset(
+            key,
+            mapping={
+                "sku": product["sku"],
+                "name": product["name"],
+                "price": str(product["price"]),
+                "stock": str(product["stock"]),
+            },
+        )
     # Store the SKU index
     await redis_client.sadd("product:skus", *[p["sku"] for p in SEED_PRODUCTS])
     logger.info("Inventory service started – seeded %d products", len(SEED_PRODUCTS))
@@ -68,12 +71,14 @@ async def list_products() -> list[dict[str, Any]]:
         for sku in sorted(skus):
             data = await redis_client.hgetall(f"product:{sku}")
             if data:
-                products.append({
-                    "sku": data["sku"],
-                    "name": data["name"],
-                    "price": float(data["price"]),
-                    "stock": int(data["stock"]),
-                })
+                products.append(
+                    {
+                        "sku": data["sku"],
+                        "name": data["name"],
+                        "price": float(data["price"]),
+                        "stock": int(data["stock"]),
+                    }
+                )
         span.set_attribute("inventory.product_count", len(products))
         return products
 
@@ -101,12 +106,14 @@ async def reserve(request: Request) -> JSONResponse:
                 reserved.append(sku)
 
         logger.info(
-            json.dumps({
-                "event": "inventory_reserved",
-                "order_id": order_id,
-                "reserved_skus": reserved,
-                "requested_items": len(items),
-            })
+            json.dumps(
+                {
+                    "event": "inventory_reserved",
+                    "order_id": order_id,
+                    "reserved_skus": reserved,
+                    "requested_items": len(items),
+                }
+            )
         )
 
         return JSONResponse(

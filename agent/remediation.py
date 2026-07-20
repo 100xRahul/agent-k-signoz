@@ -32,8 +32,15 @@ OTEL_ENDPOINT = os.getenv(
 BASELINE_VERSION = "1.4.1"
 
 # Flags the agent may clear. chaos:* keys are the sandbox's feature/chaos switchboard.
-KNOWN_FLAGS = {"bad-deploy", "pool-exhaustion", "flag-combo", "secret-leak",
-               "new-checkout", "express-pay", "gift-wrap"}
+KNOWN_FLAGS = {
+    "bad-deploy",
+    "pool-exhaustion",
+    "flag-combo",
+    "secret-leak",
+    "new-checkout",
+    "express-pay",
+    "gift-wrap",
+}
 
 # Services the agent may touch.
 ALLOWED_SERVICES = {"gateway", "checkout", "payment", "inventory", "loadgen"}
@@ -90,43 +97,69 @@ def _normalize_target(params: dict[str, Any]) -> str:
 
 
 async def _error_count(service: str, minutes: int = 2) -> int | None:
-    """Query SigNoz for the service's recent error count. None if unparseable."""
-    try:
-        from tools_rest import signoz_aggregate_traces
+    """Query SigNoz (Query Builder v5) for the service's recent error count.
 
-        raw = await signoz_aggregate_traces(
-            aggregate_operator="count",
-            filters=[
-                {
-                    "key": {"key": "service.name", "type": "resource", "dataType": "string"},
-                    "op": "=",
-                    "value": service,
-                },
-                {
-                    "key": {"key": "has_error", "type": "tag", "dataType": "bool"},
-                    "op": "=",
-                    "value": "true",
-                },
-            ],
-        )
-        data = json.loads(raw)
-        # Sum whatever numeric series values came back — shape-tolerant.
+    Returns None if the query fails or yields no parseable number.
+    """
+    try:
+        import httpx
+
+        from config import settings
+
+        now_ms = int(time.time() * 1000)
+        payload = {
+            "start": now_ms - minutes * 60 * 1000,
+            "end": now_ms,
+            "requestType": "scalar",
+            "compositeQuery": {
+                "queries": [
+                    {
+                        "type": "builder_query",
+                        "spec": {
+                            "name": "A",
+                            "signal": "traces",
+                            "stepInterval": "60s",
+                            "aggregations": [{"expression": "count()"}],
+                            "filter": {
+                                "expression": (
+                                    f"service.name = '{service}' AND has_error = true"
+                                )
+                            },
+                        },
+                    }
+                ]
+            },
+        }
+        headers = {"Content-Type": "application/json"}
+        if settings.signoz_api_key:
+            headers["SIGNOZ-API-KEY"] = settings.signoz_api_key
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                settings.signoz_internal_url.rstrip("/") + "/api/v5/query_range",
+                headers=headers,
+                json=payload,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+        # Sum whatever numeric aggregation values came back — shape-tolerant.
         total = 0.0
         found = False
 
         def walk(node: Any) -> None:
             nonlocal total, found
             if isinstance(node, dict):
-                if "value" in node and isinstance(node["value"], (int, float)):
-                    total += float(node["value"])
-                    found = True
-                for v in node.values():
-                    walk(v)
+                for key, v in node.items():
+                    if key.startswith("__result") and isinstance(v, (int, float)):
+                        total += float(v)
+                        found = True
+                    else:
+                        walk(v)
             elif isinstance(node, list):
                 for v in node:
                     walk(v)
 
-        walk(data)
+        walk(data.get("data", {}))
         return int(total) if found else None
     except Exception:
         logger.exception("Error-count verification query failed for %s", service)
@@ -168,7 +201,9 @@ async def rollback_verify(params: dict[str, Any]) -> str:
         )
     if errors <= 2:
         return f"✅ Verified: {service} error count in the last window is {errors} — recovery confirmed."
-    return f"⚠️ {service} still shows {errors} errors after rollback — needs a human look."
+    return (
+        f"⚠️ {service} still shows {errors} errors after rollback — needs a human look."
+    )
 
 
 async def disable_flag_run(params: dict[str, Any]) -> str:

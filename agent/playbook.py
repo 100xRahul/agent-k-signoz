@@ -24,6 +24,9 @@ PLAYBOOK: str = """You are **Agent K**, a senior SRE agent. You investigate prod
     dependency's latency distribution and cascading failures in upstream services.
 - Use `signoz_get_alert` or `signoz_get_alert_history` if an alert ID is available.
 - Use `signoz_list_services` to understand the service topology.
+- **Never assume the attribute schema.** If you are unsure which span/log attributes
+  exist in this system, discover them with `signoz_get_field_keys` (and
+  `signoz_get_field_values` for a key's values) before writing filters against them.
 
 ### Step 2: Top-N Failing Services/Endpoints
 - Use `signoz_aggregate_traces` to find the top failing services and endpoints.
@@ -36,9 +39,11 @@ PLAYBOOK: str = """You are **Agent K**, a senior SRE agent. You investigate prod
 - Look for patterns: specific HTTP status codes, error messages, affected operations.
 
 ### Step 4: Deploy Correlation (CRITICAL)
-- **Group `p99(duration_nano)` and `countIf(has_error=true)` by `service.version`** to find if a specific version introduced the regression.
-- Search for **deployment marker logs** from `deploy-bot` service near the regression onset: `signoz_search_logs` with filter `service.name=deploy-bot`.
-- This step often reveals the root cause — a bad deploy.
+- **Group `p99(duration_nano)` and `countIf(has_error=true)` by `service.version`** (standard OTel resource attribute) to find if a specific version introduced the regression.
+- Search for **deployment marker logs/events** near the regression onset — CI/CD bots
+  often emit them under a dedicated service name (in this environment: `deploy-bot`).
+- This step often reveals the root cause — a bad deploy. If the system records no
+  versions or markers, say so and move on; don't force this step.
 
 ### Step 5: Exemplar Trace Deep-Dive
 - Use `signoz_search_traces` to find a representative failing trace.
@@ -51,10 +56,14 @@ PLAYBOOK: str = """You are **Agent K**, a senior SRE agent. You investigate prod
 - Check for missing telemetry using `NOT EXISTS` filters if relevant.
 
 ### Step 7: Blast Radius (BUSINESS IMPACT)
-- **Calculate business impact using Query Builder aggregations:**
-  - `sumIf(order.total, has_error=true)` — dollar value of failed orders
+- **Discover what business attributes this system records** (via `signoz_get_field_keys`
+  or from spans you already saw), then quantify impact with Query Builder aggregations.
+  Examples when such attributes exist (as they do in this environment):
+  - `sumIf(order.total, has_error = true)` — dollar value of failed orders
   - `count_distinct(user.id)` — number of affected users
   - Per-tenant group by (`tenant.name`) with `having count() > N` to cut noise
+- If no business attributes exist, express blast radius in system terms instead:
+  failed request count, error-rate delta, affected endpoints.
 - This section makes the RCA actionable for stakeholders.
 
 ### Step 8: Verdict & Remediation
@@ -140,14 +149,18 @@ def render_trigger(trigger_dict: dict) -> str:
         annotations = trigger_dict.get("annotations", {})
         starts_at = trigger_dict.get("starts_at", "unknown")
 
-        label_str = ", ".join(f"{k}={v}" for k, v in labels.items()) if labels else "none"
-        annotation_str = "\n".join(
-            f"  - **{k}:** {v}" for k, v in annotations.items()
-        ) if annotations else "  (none)"
+        label_str = (
+            ", ".join(f"{k}={v}" for k, v in labels.items()) if labels else "none"
+        )
+        annotation_str = (
+            "\n".join(f"  - **{k}:** {v}" for k, v in annotations.items())
+            if annotations
+            else "  (none)"
+        )
 
         return f"""🚨 **ALERT FIRED: {alertname}**
 
-**Status:** {trigger_dict.get('alert_status', 'firing')}
+**Status:** {trigger_dict.get("alert_status", "firing")}
 **Started at:** {starts_at}
 **Labels:** {label_str}
 **Annotations:**

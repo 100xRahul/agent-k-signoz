@@ -39,5 +39,5 @@ reports/*.md
 .python-version
 uv.lock
 
-# SigNoz deploy
-deploy/signoz/
+# SigNoz deploy — casting.yaml + forged pours/ are committed on purpose so a
+# fresh clone can `make up` without foundryctl installed.

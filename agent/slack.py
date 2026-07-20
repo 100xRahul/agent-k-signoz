@@ -133,23 +133,27 @@ async def post_rca(
     # Add trace link if available
     if trace_id:
         trace_url = f"{settings.signoz_url}/trace/{trace_id}"
-        blocks.append({
-            "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": f"📊 <{trace_url}|View Agent K's investigation trace in SigNoz>",
-            },
-        })
+        blocks.append(
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"📊 <{trace_url}|View Agent K's investigation trace in SigNoz>",
+                },
+            }
+        )
 
     # Add report page link
     report_url = f"{settings.agent_public_url}/reports/{inv_id}"
-    blocks.append({
-        "type": "section",
-        "text": {
-            "type": "mrkdwn",
-            "text": f"📋 <{report_url}|View full report>",
-        },
-    })
+    blocks.append(
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": f"📋 <{report_url}|View full report>",
+            },
+        }
+    )
 
     payload = {"blocks": blocks}
     await _send_webhook(payload)
@@ -211,15 +215,17 @@ async def post_remediation_proposal(
 
     # If auto-approve is on, note it
     if settings.auto_approve:
-        blocks.append({
-            "type": "context",
-            "elements": [
-                {
-                    "type": "mrkdwn",
-                    "text": "⚡ AUTO_APPROVE is enabled — remediation will execute immediately.",
-                },
-            ],
-        })
+        blocks.append(
+            {
+                "type": "context",
+                "elements": [
+                    {
+                        "type": "mrkdwn",
+                        "text": "⚡ AUTO_APPROVE is enabled — remediation will execute immediately.",
+                    },
+                ],
+            }
+        )
 
     payload = {"blocks": blocks}
     await _send_webhook(payload)
@@ -239,7 +245,9 @@ async def post_verification(
         return
 
     emoji = "✅" if success else "❌"
-    status_text = "Verified — recovery confirmed" if success else "Verification inconclusive"
+    status_text = (
+        "Verified — recovery confirmed" if success else "Verification inconclusive"
+    )
 
     blocks: list[dict[str, Any]] = [
         {

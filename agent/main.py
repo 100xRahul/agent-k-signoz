@@ -93,9 +93,7 @@ async def webhook_signoz(
             logger.info("Skipping alert %s: %s", alertname, reason)
             continue
 
-        trigger = InvestigationTrigger.from_webhook(
-            AlertmanagerWebhook(alerts=[alert])
-        )
+        trigger = InvestigationTrigger.from_webhook(AlertmanagerWebhook(alerts=[alert]))
 
         _running_alerts.add(alertname)
         background_tasks.add_task(_investigate_and_cleanup, trigger, alertname)
@@ -111,7 +109,9 @@ async def _investigate_and_cleanup(
 ) -> None:
     """Run investigation and clean up tracking set."""
     try:
-        investigation_id = store.create_investigation(trigger_json=trigger.model_dump_json())
+        investigation_id = store.create_investigation(
+            trigger_json=trigger.model_dump_json()
+        )
         await run_investigation(trigger, investigation_id)
     finally:
         _running_alerts.discard(alertname)
@@ -127,10 +127,13 @@ async def investigate(
     """Manually trigger an investigation."""
     trigger = InvestigationTrigger.from_manual(body.prompt)
 
-    investigation_id = store.create_investigation(trigger_json=trigger.model_dump_json())
+    investigation_id = store.create_investigation(
+        trigger_json=trigger.model_dump_json()
+    )
     background_tasks.add_task(run_investigation, trigger, investigation_id)
     return JSONResponse(
-        status_code=202, content={"status": "investigation started", "prompt": body.prompt}
+        status_code=202,
+        content={"status": "investigation started", "prompt": body.prompt},
     )
 
 
@@ -162,7 +165,7 @@ async def approve_action(action_id: str, sig: str = Query(...)) -> HTMLResponse:
             content=f"""
             <html><body style="background:#1a1a2e;color:#e0e0e0;font-family:monospace;padding:2rem">
             <h1>🕶️ Agent K</h1>
-            <p>Action <code>{action_id}</code> is already <strong>{action['status']}</strong>.</p>
+            <p>Action <code>{action_id}</code> is already <strong>{action["status"]}</strong>.</p>
             </body></html>
             """
         )
@@ -173,7 +176,9 @@ async def approve_action(action_id: str, sig: str = Query(...)) -> HTMLResponse:
     params = json.loads(action["params_json"]) if action["params_json"] else {}
     result = await execute_action(action["kind"], params)
 
-    store.update_action(action_id, status="executed", executed_at=datetime.now(timezone.utc).isoformat())
+    store.update_action(
+        action_id, status="executed", executed_at=datetime.now(timezone.utc).isoformat()
+    )
 
     # Start verification in background (keep a ref so the task isn't GC'd)
     task = asyncio.create_task(_verify_and_update(action_id, action, params, result))
@@ -184,7 +189,7 @@ async def approve_action(action_id: str, sig: str = Query(...)) -> HTMLResponse:
         content=f"""
         <html><body style="background:#1a1a2e;color:#e0e0e0;font-family:monospace;padding:2rem">
         <h1>🕶️ Agent K — Action Approved</h1>
-        <p>✅ Action <code>{action['kind']}</code> executed successfully.</p>
+        <p>✅ Action <code>{action["kind"]}</code> executed successfully.</p>
         <pre>{result}</pre>
         <p>Verification in progress...</p>
         </body></html>

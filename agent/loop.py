@@ -89,36 +89,25 @@ REMEDIATION_TOOL: dict[str, Any] = {
 }
 
 
-# ── Tool router ───────────────────────────────────────────────────
+# ── Tool source ───────────────────────────────────────────────────
+
 
 async def _get_tools() -> tuple[list[dict[str, Any]], Any]:
-    """Get tool definitions and the tool caller (MCP or REST fallback)."""
-    # Try MCP first
-    try:
-        from tools_mcp import mcp_client
-        openai_tools = await mcp_client.get_openai_tools()
-        if openai_tools:
-            logger.info("Using MCP tools (%d tools loaded)", len(openai_tools))
-            return openai_tools, mcp_client
-    except Exception:
-        logger.warning("MCP tools unavailable, falling back to REST")
+    """Get tool definitions from the SigNoz MCP server.
 
-    # Fallback to REST
-    from tools_rest import get_rest_openai_tools
-    return get_rest_openai_tools(), None
+    No fallback: if the MCP server is unreachable the investigation fails
+    loudly rather than degrading silently.
+    """
+    from tools_mcp import mcp_client
 
-
-async def _call_tool(
-    name: str,
-    args: dict[str, Any],
-    mcp_client: Any | None,
-) -> str:
-    """Route a tool call to MCP or REST fallback."""
-    if mcp_client is not None:
-        return await mcp_client.call_tool(name, args)
-    else:
-        from tools_rest import call_tool_rest
-        return await call_tool_rest(name, args)
+    openai_tools = await mcp_client.get_openai_tools()
+    if not openai_tools:
+        raise RuntimeError(
+            f"SigNoz MCP server at {settings.mcp_url} returned no usable tools — "
+            "check that the mcp-server container is running and SIGNOZ_API_KEY is valid."
+        )
+    logger.info("Using MCP tools (%d tools loaded)", len(openai_tools))
+    return openai_tools, mcp_client
 
 
 # ── Main investigation loop ──────────────────────────────────────
@@ -147,8 +136,26 @@ async def run_investigation(
             api_key=settings.openai_api_key,
         )
 
-        # Get tools
-        sigtools, mcp = await _get_tools()
+        # Get tools — a failure here is fatal for the investigation, but must
+        # still produce a failed record + report instead of a stuck "running" row.
+        try:
+            sigtools, mcp = await _get_tools()
+        except Exception as exc:
+            logger.exception("Investigation %s could not load tools", investigation_id)
+            store.update_investigation(
+                investigation_id,
+                status="failed",
+                finished_at=datetime.now(timezone.utc).isoformat(),
+                report_md=f"# ❌ Investigation Failed\n\nCould not load SigNoz tools: {exc}",
+                root_cause="SigNoz MCP server unavailable",
+            )
+            set_investigation_result(
+                inv_span,
+                root_cause="SigNoz MCP server unavailable",
+                confidence="low",
+                total_cost_usd=0.0,
+            )
+            return
         all_tools = sigtools + [FINISH_TOOL, REMEDIATION_TOOL]
 
         # Initialize messages
@@ -170,21 +177,26 @@ async def run_investigation(
             for iteration in range(settings.max_iterations):
                 logger.info(
                     "Investigation %s — iteration %d/%d (cost: $%.4f)",
-                    investigation_id, iteration + 1, settings.max_iterations, total_cost,
+                    investigation_id,
+                    iteration + 1,
+                    settings.max_iterations,
+                    total_cost,
                 )
 
                 # Two iterations before the cap, tell the model to wrap up so
                 # every investigation ends with a real report, never a timeout.
                 last_chance = iteration >= settings.max_iterations - 2
                 if iteration == settings.max_iterations - 2:
-                    messages.append({
-                        "role": "user",
-                        "content": (
-                            "You are almost out of tool-call budget. Stop gathering "
-                            "evidence and call finish_investigation NOW with your "
-                            "best conclusion from the evidence you already have."
-                        ),
-                    })
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                "You are almost out of tool-call budget. Stop gathering "
+                                "evidence and call finish_investigation NOW with your "
+                                "best conclusion from the evidence you already have."
+                            ),
+                        }
+                    )
 
                 # ── LLM call ──────────────────────────────────────
                 with llm_call_span(settings.openai_model) as llm_span:
@@ -194,7 +206,10 @@ async def run_investigation(
                             messages=messages,
                             tools=all_tools,
                             tool_choice=(
-                                {"type": "function", "function": {"name": "finish_investigation"}}
+                                {
+                                    "type": "function",
+                                    "function": {"name": "finish_investigation"},
+                                }
                                 if last_chance
                                 else "auto"
                             ),
@@ -287,11 +302,13 @@ async def run_investigation(
                         # Rewrite signoz:// links
                         report_md = rewrite_signoz_links(report_md)
 
-                        messages.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
-                            "content": "Investigation finished. Report saved.",
-                        })
+                        messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tool_call.id,
+                                "content": "Investigation finished. Report saved.",
+                            }
+                        )
                         finished = True
                         break
 
@@ -300,30 +317,36 @@ async def run_investigation(
                         result = await _handle_propose_remediation(
                             investigation_id, fn_args
                         )
-                        messages.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
-                            "content": result,
-                        })
+                        messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tool_call.id,
+                                "content": result,
+                            }
+                        )
 
                     # ── MCP / REST tools ──────────────────────────
                     else:
                         args_summary = json.dumps(fn_args)[:500]
                         with tool_call_span(fn_name, args_summary) as t_span:
-                            result = await _call_tool(fn_name, fn_args, mcp)
+                            result = await mcp.call_tool(fn_name, fn_args)
                             result_bytes = len(result.encode("utf-8"))
-                            is_error = (result.startswith("MCP tool call") and "failed" in result) or (result.startswith("REST tool") and "failed" in result) or result.startswith("Unknown tool")
+                            is_error = result.startswith("MCP tool call") and (
+                                "failed" in result
+                            )
                             set_tool_result(t_span, result_bytes, is_error)
 
                         # Truncate result for context window
                         if len(result) > 15000:
                             result = result[:15000] + "\n... [truncated]"
 
-                        messages.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
-                            "content": result,
-                        })
+                        messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tool_call.id,
+                                "content": result,
+                            }
+                        )
 
                 if finished:
                     break
@@ -332,7 +355,9 @@ async def run_investigation(
                 if total_cost > settings.max_cost_usd_per_investigation:
                     logger.warning(
                         "Investigation %s hit cost limit ($%.4f > $%.2f)",
-                        investigation_id, total_cost, settings.max_cost_usd_per_investigation,
+                        investigation_id,
+                        total_cost,
+                        settings.max_cost_usd_per_investigation,
                     )
                     report_md = (
                         f"# ⚠️ Investigation Budget Exceeded\n\n"
@@ -390,7 +415,11 @@ async def run_investigation(
 
         logger.info(
             "Investigation %s completed: status=%s, cost=$%.4f, duration=%.1fs, root_cause=%s",
-            investigation_id, status, total_cost, duration, root_cause[:100],
+            investigation_id,
+            status,
+            total_cost,
+            duration,
+            root_cause[:100],
         )
 
 
@@ -431,6 +460,7 @@ async def _handle_propose_remediation(
     if settings.auto_approve:
         logger.info("AUTO_APPROVE is on — executing remediation immediately")
         from remediation import execute_action
+
         store.update_action(action_id, status="approved")
         try:
             result = await execute_action(kind, params)

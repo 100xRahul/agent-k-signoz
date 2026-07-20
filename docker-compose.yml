@@ -9,7 +9,7 @@ services:
     ports:
       - "8000:8000"
     networks:
-      - signoz_default
+      - signoz-network
     restart: unless-stopped
 
   # ─── Postgres (sandbox) ────────────────────────────────
@@ -27,7 +27,7 @@ services:
       timeout: 3s
       retries: 10
     networks:
-      - signoz_default
+      - signoz-network
 
   # ─── Redis (sandbox) ───────────────────────────────────
   sandbox-redis:
@@ -38,7 +38,7 @@ services:
       timeout: 3s
       retries: 10
     networks:
-      - signoz_default
+      - signoz-network
 
   # ─── Gateway ───────────────────────────────────────────
   gateway:
@@ -55,7 +55,7 @@ services:
       - checkout
       - inventory
     networks:
-      - signoz_default
+      - signoz-network
     restart: unless-stopped
 
   # ─── Checkout ──────────────────────────────────────────
@@ -76,7 +76,7 @@ services:
       sandbox-redis:
         condition: service_healthy
     networks:
-      - signoz_default
+      - signoz-network
     restart: unless-stopped
 
   # ─── Payment ───────────────────────────────────────────
@@ -97,7 +97,7 @@ services:
       sandbox-redis:
         condition: service_healthy
     networks:
-      - signoz_default
+      - signoz-network
     restart: unless-stopped
 
   # ─── Inventory ─────────────────────────────────────────
@@ -114,7 +114,7 @@ services:
       sandbox-redis:
         condition: service_healthy
     networks:
-      - signoz_default
+      - signoz-network
     restart: unless-stopped
 
   # ─── Load Generator ───────────────────────────────────
@@ -128,7 +128,7 @@ services:
     depends_on:
       - gateway
     networks:
-      - signoz_default
+      - signoz-network
     restart: unless-stopped
 
   # ─── Agent K ───────────────────────────────────────────
@@ -168,7 +168,7 @@ services:
       - mcp-server
       - sandbox-redis
     networks:
-      - signoz_default
+      - signoz-network
     restart: unless-stopped
 
   # ─── Chaos CLI (run on-demand) ──────────────────────
@@ -179,13 +179,13 @@ services:
       - REDIS_URL=redis://sandbox-redis:6379
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://signoz-otel-collector:4317
     networks:
-      - signoz_default
+      - signoz-network
 
 volumes:
   sandbox_pgdata:
   agent_data:
 
 networks:
-  signoz_default:
+  signoz-network:
     external: true
-    name: signoz_default
+    name: signoz-network

@@ -2,7 +2,7 @@
 
 > **Purpose:** Quick technical reference for the entire codebase. Read this instead of re-reading all source files. Kept up-to-date as changes are made.
 >
-> **Last updated:** 2026-07-16 (post code-review overhaul: async LLM client, Redis-driven deploys — no docker-in-docker, alert cooldown + resolved-gate, real rollback verification, root-context agent image)
+> **Last updated:** 2026-07-19 (SigNoz self-host migrated to **Foundry** — SigNoz removed their compose manifests from the repo; we forge manifests from `deploy/signoz/casting.yaml` and commit `pours/`)
 
 ---
 
@@ -34,8 +34,9 @@ signoz-hacakethon/
 │   ├── models.py                # Pydantic models: AlertmanagerWebhook, triggers
 │   ├── loop.py                  # Agent reasoning loop (tool-use over OpenAI API)
 │   ├── playbook.py              # System prompt (SRE runbook, 8 investigation steps)
-│   ├── tools_mcp.py             # MCP client (streamable HTTP, 10-tool allowlist)
-│   ├── tools_rest.py            # REST fallback (SigNoz query_range v5)
+│   ├── tools_mcp.py             # MCP client (streamable HTTP, 14-tool allowlist).
+│   │                            #   MCP is the ONLY tool path — no REST fallback;
+│   │                            #   MCP down = investigation fails loudly
 │   ├── remediation.py           # Guarded actions: rollback, disable_flag, restart
 │   ├── report.py                # signoz:// link rewriting, HTML rendering
 │   ├── slack.py                 # Block Kit messages, HMAC approval links
@@ -98,7 +99,9 @@ signoz-hacakethon/
 │
 ├── reports/                     # Generated RCA outputs (.gitkeep)
 └── deploy/
-    └── signoz/                  # SigNoz self-host compose (cloned at make up)
+    └── signoz/                  # SigNoz self-host via Foundry
+        ├── casting.yaml         # Foundry install spec (+ alias patches)
+        └── pours/deployment/    # Forged manifests (committed; `make forge-signoz` regenerates)
 ```
 
 ---
@@ -193,14 +196,15 @@ client would block the event loop and freeze webhooks/approvals during LLM calls
    `tool_choice` is forced to `finish_investigation` — no investigation ends empty
 4. Persist final results to SQLite, set span attributes, post to Slack
 
-### Tool Allowlist (12 tools)
-**SigNoz tools (10):** `signoz_list_services`, `signoz_aggregate_traces`, `signoz_search_traces`, `signoz_get_trace_details`, `signoz_search_logs`, `signoz_aggregate_logs`, `signoz_query_metrics`, `signoz_execute_builder_query`, `signoz_get_alert`, `signoz_get_alert_history`
+### Tool Allowlist (16 tools)
+**SigNoz MCP tools (14):** `signoz_list_services`, `signoz_get_service_top_operations`, `signoz_aggregate_traces`, `signoz_search_traces`, `signoz_get_trace_details`, `signoz_search_logs`, `signoz_aggregate_logs`, `signoz_query_metrics`, `signoz_execute_builder_query`, `signoz_get_field_keys`, `signoz_get_field_values`, `signoz_list_alerts`, `signoz_get_alert`, `signoz_get_alert_history`
+
+The field-discovery tools (`get_field_keys`/`get_field_values`) let the agent adapt to systems whose attribute schema it has never seen — the playbook tells it to discover attributes before filtering on them.
 
 **Synthetic tools (2):** `finish_investigation(report_markdown, root_cause_oneliner, confidence)`, `propose_remediation(kind, service, reason)`
 
 ### Tool Routing
-1. Try MCP client (`tools_mcp.py`) — streamable HTTP to `mcp-server:8000/mcp`
-2. Fallback to REST wrappers (`tools_rest.py`) — direct SigNoz `query_range` v5 API
+MCP only (`tools_mcp.py` — streamable HTTP to `mcp-server:8000/mcp`). No REST fallback: if MCP is unreachable the investigation is marked `failed` with a clear report (fail loudly, never degrade silently). Remediation verification queries SigNoz directly via `query_range` v5 (`remediation.py:_error_count`).
 
 ---
 
@@ -287,11 +291,15 @@ Runs via `make provision` → `docker compose exec agent python -m provisioning.
 
 ## Docker Compose Topology
 
-Two compose layers, one `signoz_default` network:
+Two compose layers, one `signoz-network` network. SigNoz layer is **forged by
+Foundry** (`deploy/signoz/casting.yaml` → `pours/deployment/compose.yaml`,
+committed). Casting patches add network aliases `signoz` (UI/API container
+`signoz-signoz-0`) and `signoz-otel-collector` (ingester) so app code keeps the
+canonical hostnames:
 
 | Service | Build/Image | Port | Key Role |
 |---------|-------------|------|----------|
-| signoz + collector | Official SigNoz compose | 8080, 4317/4318 | Observability platform |
+| signoz + ingester (Foundry) | signoz/signoz, signoz/signoz-otel-collector, clickhouse, postgres | 8080, 4317/4318 | Observability platform |
 | mcp-server | `signoz/signoz-mcp-server:latest` | 8000 | SigNoz MCP server |
 | sandbox-postgres | `postgres:16-alpine` | — | Payment DB |
 | sandbox-redis | `redis:7-alpine` | — | Chaos flags + inventory |
@@ -309,7 +317,8 @@ Two compose layers, one `signoz_default` network:
 
 | Target | What it does |
 |--------|-------------|
-| `make up` | Start SigNoz compose + app compose |
+| `make up` | Start SigNoz (forged compose) + app compose; waits on `/api/v1/health` |
+| `make forge-signoz` | Regenerate SigNoz manifests via foundryctl (only to bump SigNoz) |
 | `make down` | Stop everything |
 | `make nuke` | Stop + remove all volumes |
 | `make provision` | Provision dashboards + alerts into SigNoz |

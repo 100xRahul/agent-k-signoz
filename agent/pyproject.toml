@@ -25,3 +25,6 @@ dependencies = [
 # App, not a distributable package — flat modules, run via uvicorn.
 [tool.uv]
 package = false
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
