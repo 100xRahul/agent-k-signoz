@@ -51,23 +51,23 @@ provision:
 
 incident-bad-deploy:
 	@echo "💥 Triggering bad-deploy scenario..."
-	$(COMPOSE) exec loadgen python -m chaos bad-deploy
+	$(COMPOSE) run --rm chaos python -m chaos bad-deploy
 
 incident-pool:
 	@echo "💥 Triggering pool-exhaustion scenario..."
-	$(COMPOSE) exec loadgen python -m chaos pool-exhaustion
+	$(COMPOSE) run --rm chaos python -m chaos pool-exhaustion
 
 incident-flags:
 	@echo "💥 Triggering flag-combo scenario..."
-	$(COMPOSE) exec loadgen python -m chaos flag-combo
+	$(COMPOSE) run --rm chaos python -m chaos flag-combo
 
 incident-leak:
 	@echo "💥 Triggering secret-leak scenario..."
-	$(COMPOSE) exec loadgen python -m chaos secret-leak
+	$(COMPOSE) run --rm chaos python -m chaos secret-leak
 
 resolve:
 	@echo "✅ Resolving all chaos scenarios..."
-	$(COMPOSE) exec loadgen python -m chaos resolve
+	$(COMPOSE) run --rm chaos python -m chaos resolve
 
 # ──────────────────── Demo ────────────────────
 

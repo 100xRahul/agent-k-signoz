@@ -18,13 +18,14 @@ from config import settings
 logger = logging.getLogger(__name__)
 
 # SigNoz API base (internal, for REST calls)
-_SIGNOZ_API = settings.signoz_url.rstrip("/") + "/api"
+_SIGNOZ_API = settings.signoz_internal_url.rstrip("/") + "/api"
 
 # Headers for SigNoz API
 def _headers() -> dict[str, str]:
-    return {
-        "Content-Type": "application/json",
-    }
+    h = {"Content-Type": "application/json"}
+    if settings.signoz_api_key:
+        h["SIGNOZ-API-KEY"] = settings.signoz_api_key
+    return h
 
 
 def _ts_now_ns() -> int:

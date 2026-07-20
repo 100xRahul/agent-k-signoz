@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import sqlite3
 from datetime import datetime, timezone
 from typing import Any
@@ -119,6 +118,17 @@ class Store:
             (limit,),
         ).fetchall()
         return [dict(r) for r in rows]
+
+    def latest_investigation_for_alert(self, alertname: str) -> dict[str, Any] | None:
+        """Most recent investigation (any status) for an alertname — used for cooldown."""
+        conn = self._get_conn()
+        row = conn.execute(
+            """SELECT * FROM investigations
+               WHERE trigger_json LIKE ?
+               ORDER BY started_at DESC LIMIT 1""",
+            (f'%"alertname":"{alertname}"%',),
+        ).fetchone()
+        return dict(row) if row else None
 
     def has_running_investigation(self, alertname: str) -> bool:
         """Check if there's already a running investigation for this alert."""

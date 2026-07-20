@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import json
 import logging
+import re
 from typing import Any
 
 import httpx
@@ -13,6 +14,22 @@ import httpx
 from config import settings
 
 logger = logging.getLogger(__name__)
+
+
+def md_to_mrkdwn(text: str) -> str:
+    """Convert standard markdown to Slack mrkdwn.
+
+    Slack doesn't render `#` headings, `**bold**`, or `[text](url)` — without
+    this the RCA shows up as a wall of literal hash marks and asterisks.
+    """
+    out = text
+    # [text](url) -> <url|text>
+    out = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r"<\2|\1>", out)
+    # ## Heading -> *Heading*
+    out = re.sub(r"^#{1,6}\s*(.+)$", r"*\1*", out, flags=re.MULTILINE)
+    # **bold** -> *bold*
+    out = re.sub(r"\*\*([^*]+)\*\*", r"*\1*", out)
+    return out
 
 
 # ── HMAC approval link generation ─────────────────────────────────
@@ -67,8 +84,10 @@ async def post_rca(
     except (json.JSONDecodeError, TypeError):
         pass
 
-    # Truncate report for Slack (3000 char limit per section)
-    report_preview = report_md[:2800] + "\n..." if len(report_md) > 2800 else report_md
+    # Convert to Slack mrkdwn, then truncate (3000 char limit per section)
+    report_preview = md_to_mrkdwn(report_md)
+    if len(report_preview) > 2800:
+        report_preview = report_preview[:2800] + "\n..."
 
     # Build Block Kit message
     blocks: list[dict[str, Any]] = [
@@ -156,7 +175,7 @@ async def post_remediation_proposal(
             "type": "header",
             "text": {
                 "type": "plain_text",
-                "text": f"🔧 Agent K — Remediation Proposed",
+                "text": "🔧 Agent K — Remediation Proposed",
                 "emoji": True,
             },
         },

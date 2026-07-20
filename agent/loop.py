@@ -8,10 +8,10 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
-from openai import OpenAI
+from openai import AsyncOpenAI
 
 from config import settings
-from models import InvestigationTrigger, RemediationAction
+from models import InvestigationTrigger
 from playbook import PLAYBOOK, render_trigger
 from report import rewrite_signoz_links
 from slack import post_rca, post_remediation_proposal
@@ -140,8 +140,9 @@ async def run_investigation(
         # Update investigation with trace_id
         store.update_investigation(investigation_id, trace_id=trace_id)
 
-        # Build LLM client
-        client = OpenAI(
+        # Async client — a blocking client here would freeze every other
+        # endpoint (webhooks, approvals) for the duration of each LLM call.
+        client = AsyncOpenAI(
             base_url=settings.openai_base_url,
             api_key=settings.openai_api_key,
         )
@@ -172,14 +173,31 @@ async def run_investigation(
                     investigation_id, iteration + 1, settings.max_iterations, total_cost,
                 )
 
+                # Two iterations before the cap, tell the model to wrap up so
+                # every investigation ends with a real report, never a timeout.
+                last_chance = iteration >= settings.max_iterations - 2
+                if iteration == settings.max_iterations - 2:
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            "You are almost out of tool-call budget. Stop gathering "
+                            "evidence and call finish_investigation NOW with your "
+                            "best conclusion from the evidence you already have."
+                        ),
+                    })
+
                 # ── LLM call ──────────────────────────────────────
                 with llm_call_span(settings.openai_model) as llm_span:
                     try:
-                        response = client.chat.completions.create(
+                        response = await client.chat.completions.create(
                             model=settings.openai_model,
                             messages=messages,
                             tools=all_tools,
-                            tool_choice="auto",
+                            tool_choice=(
+                                {"type": "function", "function": {"name": "finish_investigation"}}
+                                if last_chance
+                                else "auto"
+                            ),
                             temperature=0,
                         )
                     except Exception as exc:
@@ -187,7 +205,7 @@ async def run_investigation(
                         set_llm_usage(llm_span, 0, 0, 0.0)
                         # Try to finish with what we have
                         report_md = f"# Investigation Aborted\n\nLLM call failed: {exc}"
-                        root_cause = f"Investigation aborted: LLM error"
+                        root_cause = "Investigation aborted: LLM error"
                         break
 
                     # Extract usage
@@ -294,7 +312,7 @@ async def run_investigation(
                         with tool_call_span(fn_name, args_summary) as t_span:
                             result = await _call_tool(fn_name, fn_args, mcp)
                             result_bytes = len(result.encode("utf-8"))
-                            is_error = "error" in result.lower()[:100] and "failed" in result.lower()[:200]
+                            is_error = (result.startswith("MCP tool call") and "failed" in result) or (result.startswith("REST tool") and "failed" in result) or result.startswith("Unknown tool")
                             set_tool_result(t_span, result_bytes, is_error)
 
                         # Truncate result for context window
@@ -324,6 +342,8 @@ async def run_investigation(
                         + (report_md or "No findings recorded before budget exceeded.")
                     )
                     root_cause = "Investigation budget exceeded — partial results"
+                    # A partial report is still a delivered report.
+                    finished = True
                     break
 
         except Exception:
@@ -410,10 +430,10 @@ async def _handle_propose_remediation(
     # Auto-approve if configured
     if settings.auto_approve:
         logger.info("AUTO_APPROVE is on — executing remediation immediately")
-        from remediation import execute_remediation
+        from remediation import execute_action
         store.update_action(action_id, status="approved")
         try:
-            result = await execute_remediation(action_id)
+            result = await execute_action(kind, params)
             return f"Remediation auto-approved and executed: {result}"
         except Exception as exc:
             return f"Remediation auto-approved but execution failed: {exc}"

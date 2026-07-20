@@ -118,7 +118,7 @@ async def pay(request: Request) -> JSONResponse:
                     await asyncio.sleep(5.0)
                 finally:
                     await pg_pool.release(conn)
-            except (asyncio.TimeoutError, Exception) as exc:
+            except Exception as exc:
                 span.set_attribute("has_error", True)
                 span.set_status(trace.StatusCode.ERROR, "pool exhaustion: timeout acquiring connection")
                 logger.error(

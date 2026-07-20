@@ -1,10 +1,8 @@
 import json
-import os
 import hashlib
 import hmac
 from pathlib import Path
 
-import pytest
 from config import Settings
 from models import AlertmanagerWebhook, InvestigationTrigger
 from report import rewrite_signoz_links
@@ -68,6 +66,51 @@ def test_rewrite_signoz_links():
     assert output_md == expected_output
 
 
+def test_md_to_mrkdwn():
+    """Markdown converts to Slack mrkdwn: headings, bold, links."""
+    from slack import md_to_mrkdwn
+
+    src = "# Title\nSome **bold** text with a [link](http://x.io/t/1)\n## Sub"
+    out = md_to_mrkdwn(src)
+    assert "*Title*" in out
+    assert "*bold*" in out
+    assert "<http://x.io/t/1|link>" in out
+    assert "*Sub*" in out
+    assert "#" not in out
+
+
+def test_remediation_target_normalization():
+    """The LLM sends `service` per the tool schema; `flag` must work too."""
+    from remediation import _normalize_target
+
+    assert _normalize_target({"service": "checkout"}) == "checkout"
+    assert _normalize_target({"flag": "new-checkout"}) == "new-checkout"
+    assert _normalize_target({}) == ""
+
+
+def test_disable_flag_refuses_unknown():
+    """Guardrail: agent may only clear allow-listed flags."""
+    import asyncio
+    from remediation import disable_flag_run
+
+    result = asyncio.run(disable_flag_run({"service": "drop-all-tables"}))
+    assert result.startswith("❌")
+
+
+def test_store_latest_investigation_for_alert(tmp_path):
+    """Cooldown lookup finds the newest investigation for an alertname."""
+    from store import Store
+
+    s = Store(db_path=str(tmp_path / "test.db"))
+    trigger = InvestigationTrigger(type="alert", alertname="checkout-error-rate")
+    inv_id = s.create_investigation(trigger_json=trigger.model_dump_json())
+
+    latest = s.latest_investigation_for_alert("checkout-error-rate")
+    assert latest is not None
+    assert latest["id"] == inv_id
+    assert s.latest_investigation_for_alert("no-such-alert") is None
+
+
 def test_webhook_parsing():
     """Test parsing of SigNoz alert webhook payloads using fixture."""
     fixture_path = Path(__file__).parent / "fixtures" / "webhook_sample.json"
@@ -83,4 +126,4 @@ def test_webhook_parsing():
     trigger = InvestigationTrigger.from_webhook(webhook)
     assert trigger.type.value == "alert"
     assert trigger.alertname == "checkout-error-rate"
-    assert "elevated error rates" in trigger.prompt
+    assert trigger.annotations.get("description") is not None

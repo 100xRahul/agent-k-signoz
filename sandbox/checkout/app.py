@@ -63,6 +63,18 @@ async def _is_chaos(scenario: str) -> bool:
     return await _redis_flag(scenario)
 
 
+async def _current_version() -> str:
+    """Deployed version comes from Redis so a 'deploy' needs no container restart."""
+    if redis_client is not None:
+        try:
+            val = await redis_client.get("chaos:checkout-version")
+            if val:
+                return val
+        except Exception:
+            pass
+    return SERVICE_VERSION
+
+
 # ── Main endpoint ─────────────────────────────────────────────────
 
 @app.post("/checkout")
@@ -77,13 +89,15 @@ async def checkout(request: Request) -> JSONResponse:
     feature_flags: list[str] = body.get("feature_flags", [])
     items: list[dict[str, Any]] = body.get("items", [])
 
+    version = await _current_version()
+
     with tracer.start_as_current_span("checkout.process_order") as span:
         span.set_attribute("order.id", order_id)
         span.set_attribute("order.total", total)
         span.set_attribute("user.id", user_id)
         span.set_attribute("tenant.name", tenant)
         span.set_attribute("feature_flags", feature_flags)
-        span.set_attribute("service.version", SERVICE_VERSION)
+        span.set_attribute("service.version", version)
 
         retry_count = 0
 
@@ -104,7 +118,7 @@ async def checkout(request: Request) -> JSONResponse:
                         "consumer_group": "orders-cg",
                         "status": "error",
                         "error": "internal checkout failure (bad-deploy)",
-                        "service_version": SERVICE_VERSION,
+                        "service_version": version,
                     })
                 )
                 return JSONResponse(
@@ -130,7 +144,7 @@ async def checkout(request: Request) -> JSONResponse:
                             "consumer_group": "orders-cg",
                             "status": "error",
                             "error": "feature flag conflict: new-checkout + express-pay",
-                            "service_version": SERVICE_VERSION,
+                            "service_version": version,
                         })
                     )
                     return JSONResponse(
@@ -164,7 +178,7 @@ async def checkout(request: Request) -> JSONResponse:
                     "consumer_group": "orders-cg",
                     "status": "error",
                     "error": f"payment service returned {pay_resp.status_code}",
-                    "service_version": SERVICE_VERSION,
+                    "service_version": version,
                 })
             )
             return JSONResponse(
@@ -194,7 +208,7 @@ async def checkout(request: Request) -> JSONResponse:
                 "total": total,
                 "user_id": user_id,
                 "tenant": tenant,
-                "service_version": SERVICE_VERSION,
+                "service_version": version,
             })
         )
 

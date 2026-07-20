@@ -133,19 +133,23 @@ services:
 
   # ─── Agent K ───────────────────────────────────────────
   agent:
-    build: ./agent
+    build:
+      context: .
+      dockerfile: agent/Dockerfile
     ports:
       - "9000:9000"
     environment:
       - OTEL_SERVICE_NAME=agent-k
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://signoz-otel-collector:4317
       - OTEL_RESOURCE_ATTRIBUTES=deployment.environment=production,service.version=1.0.0
-      - OPENAI_BASE_URL=${OPENAI_BASE_URL}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-sk-placeholder}
       - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
       - LLM_INPUT_PRICE_PER_MTOK=${LLM_INPUT_PRICE_PER_MTOK:-0}
       - LLM_OUTPUT_PRICE_PER_MTOK=${LLM_OUTPUT_PRICE_PER_MTOK:-0}
       - SIGNOZ_URL=${SIGNOZ_URL:-http://localhost:8080}
+      - SIGNOZ_INTERNAL_URL=http://signoz:8080
+      - SIGNOZ_API_KEY=${SIGNOZ_API_KEY}
       - MCP_URL=http://mcp-server:8000
       - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL:-}
       - AGENT_PUBLIC_URL=${AGENT_PUBLIC_URL:-http://localhost:9000}
@@ -157,14 +161,25 @@ services:
       - REDIS_URL=redis://sandbox-redis:6379
     volumes:
       - agent_data:/data
+      # Socket only for the guarded `restart` remediation (docker restart by
+      # compose-service label). Rollback/flags go through Redis — no docker needed.
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./docker-compose.yml:/app/docker-compose.yml:ro
     depends_on:
       - mcp-server
       - sandbox-redis
     networks:
       - signoz_default
     restart: unless-stopped
+
+  # ─── Chaos CLI (run on-demand) ──────────────────────
+  chaos:
+    build: ./sandbox/chaos
+    profiles: ["tools"]
+    environment:
+      - REDIS_URL=redis://sandbox-redis:6379
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://signoz-otel-collector:4317
+    networks:
+      - signoz_default
 
 volumes:
   sandbox_pgdata:

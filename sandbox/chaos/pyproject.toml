@@ -1,0 +1,9 @@
+[project]
+name = "chaos"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "redis>=5.0",
+    "opentelemetry-sdk>=1.20",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.20",
+]

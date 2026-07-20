@@ -10,12 +10,11 @@ Usage:
 
 import json
 import os
-import sys
 import httpx
 import time
 from pathlib import Path
 
-SIGNOZ_URL = os.environ.get("SIGNOZ_URL", "http://signoz:8080")
+SIGNOZ_URL = os.environ.get("SIGNOZ_INTERNAL_URL", os.environ.get("SIGNOZ_URL", "http://signoz:8080"))
 SIGNOZ_API_KEY = os.environ.get("SIGNOZ_API_KEY", "")
 AGENT_WEBHOOK_URL = os.environ.get("AGENT_WEBHOOK_URL", "http://agent:9000/webhook/signoz")
 SLACK_WEBHOOK_URL = os.environ.get("SLACK_WEBHOOK_URL", "")

@@ -6,7 +6,7 @@ import os
 from opentelemetry import trace, metrics
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanExporter
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
@@ -31,7 +31,7 @@ def setup_telemetry(app=None) -> trace.Tracer:
     # --- Traces ---
     tracer_provider = TracerProvider(resource=resource)
     tracer_provider.add_span_processor(
-        BatchSpanExporter(OTLPSpanExporter(endpoint=endpoint, insecure=True))
+        BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint, insecure=True))
     )
     trace.set_tracer_provider(tracer_provider)
 

@@ -11,7 +11,6 @@ from typing import Any
 import redis.asyncio as aioredis
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from opentelemetry import trace
 
 from telemetry import setup_telemetry
 

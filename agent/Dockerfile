@@ -1,6 +1,6 @@
 FROM python:3.12-slim AS base
 
-# Install Docker CLI (for remediation — docker compose commands)
+# Docker CLI only — used by the guarded `restart` remediation via the host socket.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         ca-certificates curl gnupg && \
@@ -11,7 +11,7 @@ RUN apt-get update && \
     https://download.docker.com/linux/debian $(. /etc/os-release && echo $VERSION_CODENAME) stable" \
     > /etc/apt/sources.list.d/docker.list && \
     apt-get update && \
-    apt-get install -y --no-install-recommends docker-ce-cli docker-compose-plugin && \
+    apt-get install -y --no-install-recommends docker-ce-cli && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install uv
@@ -19,20 +19,16 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 WORKDIR /app
 
-# Copy dependency files first for layer caching
-COPY pyproject.toml ./
+# Build context is the repo root (see docker-compose.yml) so the image can
+# carry both the agent and the provisioning package.
+COPY agent/pyproject.toml ./
 
-# Install dependencies
 RUN uv pip install --system --no-cache -r pyproject.toml
 
-# Copy application code
-COPY . .
+COPY agent/ ./
+COPY provisioning/ ./provisioning/
 
-# Create data directory
 RUN mkdir -p /data
-
-# Create templates directory if not already present
-RUN mkdir -p /app/templates
 
 EXPOSE 9000
 

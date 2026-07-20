@@ -7,17 +7,18 @@ import hashlib
 import hmac
 import json
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import markdown
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from config import Settings
+from config import settings
 from models import AlertmanagerWebhook, InvestigationTrigger, InvestigateRequest
-from store import Store
+from store import store
 from telemetry import setup_telemetry
 from loop import run_investigation
 from remediation import execute_action, verify_action
@@ -25,14 +26,43 @@ from slack import post_verification
 
 logger = logging.getLogger("agent-k")
 
-settings = Settings()
 app = FastAPI(title="Agent K", version="1.0.0", description="AI SRE Sidekick")
-tracer = setup_telemetry(app)
-store = Store(settings.db_path)
+setup_telemetry(app)
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 # Track running investigations to dedupe
 _running_alerts: set[str] = set()
+# Keep refs to fire-and-forget tasks so they aren't garbage-collected mid-flight
+_background_tasks: set[asyncio.Task] = set()
+
+
+def should_investigate(alertname: str, alert_status: str) -> tuple[bool, str]:
+    """Decide whether an incoming alert warrants a new investigation.
+
+    Alerts re-fire on every evaluation interval, and SigNoz also notifies on
+    resolution — without this gate the agent would re-investigate the same
+    incident every minute and burn tokens on alerts that already recovered.
+    """
+    if alert_status == "resolved":
+        return False, "alert is resolved"
+
+    if alertname in _running_alerts:
+        return False, "investigation already running"
+
+    latest = store.latest_investigation_for_alert(alertname)
+    if latest and latest.get("started_at"):
+        try:
+            started = datetime.fromisoformat(latest["started_at"])
+            age_min = (datetime.now(timezone.utc) - started).total_seconds() / 60
+            if age_min < settings.investigation_cooldown_minutes:
+                return False, (
+                    f"cooldown — investigated {age_min:.0f} min ago "
+                    f"(window: {settings.investigation_cooldown_minutes} min)"
+                )
+        except ValueError:
+            pass
+
+    return True, "new incident"
 
 
 # ── Webhook endpoint ────────────────────────────────────────────
@@ -54,12 +84,13 @@ async def webhook_signoz(
             status_code=400, content={"error": f"Invalid payload: {exc}"}
         )
 
+    accepted: list[str] = []
     for alert in webhook.alerts:
         alertname = alert.labels.get("alertname", "unknown")
 
-        # Dedupe: skip if already investigating this alert
-        if alertname in _running_alerts:
-            logger.info("Skipping duplicate alert: %s (already investigating)", alertname)
+        ok, reason = should_investigate(alertname, alert.status.value)
+        if not ok:
+            logger.info("Skipping alert %s: %s", alertname, reason)
             continue
 
         trigger = InvestigationTrigger.from_webhook(
@@ -68,8 +99,11 @@ async def webhook_signoz(
 
         _running_alerts.add(alertname)
         background_tasks.add_task(_investigate_and_cleanup, trigger, alertname)
+        accepted.append(alertname)
 
-    return JSONResponse(status_code=200, content={"status": "accepted"})
+    return JSONResponse(
+        status_code=200, content={"status": "accepted", "investigating": accepted}
+    )
 
 
 async def _investigate_and_cleanup(
@@ -77,7 +111,8 @@ async def _investigate_and_cleanup(
 ) -> None:
     """Run investigation and clean up tracking set."""
     try:
-        await run_investigation(trigger, settings, store)
+        investigation_id = store.create_investigation(trigger_json=trigger.model_dump_json())
+        await run_investigation(trigger, investigation_id)
     finally:
         _running_alerts.discard(alertname)
 
@@ -92,7 +127,8 @@ async def investigate(
     """Manually trigger an investigation."""
     trigger = InvestigationTrigger.from_manual(body.prompt)
 
-    background_tasks.add_task(run_investigation, trigger, settings, store)
+    investigation_id = store.create_investigation(trigger_json=trigger.model_dump_json())
+    background_tasks.add_task(run_investigation, trigger, investigation_id)
     return JSONResponse(
         status_code=202, content={"status": "investigation started", "prompt": body.prompt}
     )
@@ -112,9 +148,7 @@ def _verify_hmac(action_id: str, sig: str) -> bool:
 
 
 @app.get("/approve/{action_id}")
-async def approve_action(
-    action_id: str, sig: str = Query(...), request: Request = None
-) -> HTMLResponse:
+async def approve_action(action_id: str, sig: str = Query(...)) -> HTMLResponse:
     """Approve and execute a remediation action."""
     if not _verify_hmac(action_id, sig):
         raise HTTPException(status_code=403, detail="Invalid signature")
@@ -139,10 +173,12 @@ async def approve_action(
     params = json.loads(action["params_json"]) if action["params_json"] else {}
     result = await execute_action(action["kind"], params)
 
-    store.update_action(action_id, status="executed", executed_at="now")
+    store.update_action(action_id, status="executed", executed_at=datetime.now(timezone.utc).isoformat())
 
-    # Start verification in background
-    asyncio.create_task(_verify_and_update(action_id, action, params, result))
+    # Start verification in background (keep a ref so the task isn't GC'd)
+    task = asyncio.create_task(_verify_and_update(action_id, action, params, result))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
     return HTMLResponse(
         content=f"""
@@ -168,10 +204,11 @@ async def _verify_and_update(
     if investigation:
         await post_verification(
             investigation_id=action["investigation_id"],
-            action_kind=action["kind"],
-            exec_result=exec_result,
-            verification_result=verification,
-            settings=settings,
+            action_id=action_id,
+            kind=action["kind"],
+            service=params.get("service", ""),
+            result=verification,
+            success="✅" in verification,
         )
 
 
@@ -208,11 +245,17 @@ async def get_report(investigation_id: str, request: Request) -> HTMLResponse:
             "request": request,
             "investigation": investigation,
             "report_html": report_html,
+            "signoz_url": settings.signoz_url,
         },
     )
 
 
 # ── Health ──────────────────────────────────────────────────────
+
+
+@app.get("/")
+async def root() -> RedirectResponse:
+    return RedirectResponse(url="/reports")
 
 
 @app.get("/healthz")

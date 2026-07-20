@@ -1,4 +1,14 @@
-"""Agent K — Remediation engine: guarded actions with verification."""
+"""Agent K — Remediation engine: guarded actions with verification.
+
+Actions are deliberately narrow and reversible:
+  - rollback:      restore checkout to the baseline version (Redis-driven deploy model)
+  - disable_flag:  clear a chaos/feature flag in Redis
+  - restart:       docker-restart a sandbox container (located by compose label,
+                   so it works regardless of compose project name)
+
+Verification is data-driven where possible: after a rollback we re-query SigNoz
+for the service's error count and report the actual number, not a promise.
+"""
 
 from __future__ import annotations
 
@@ -18,6 +28,15 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://sandbox-redis:6379")
 OTEL_ENDPOINT = os.getenv(
     "OTEL_EXPORTER_OTLP_ENDPOINT", "http://signoz-otel-collector:4317"
 )
+
+BASELINE_VERSION = "1.4.1"
+
+# Flags the agent may clear. chaos:* keys are the sandbox's feature/chaos switchboard.
+KNOWN_FLAGS = {"bad-deploy", "pool-exhaustion", "flag-combo", "secret-leak",
+               "new-checkout", "express-pay", "gift-wrap"}
+
+# Services the agent may touch.
+ALLOWED_SERVICES = {"gateway", "checkout", "payment", "inventory", "loadgen"}
 
 
 def _emit_marker_log(service: str, version: str, event: str = "rollback") -> None:
@@ -65,49 +84,101 @@ async def _get_redis() -> aioredis.Redis:
     return aioredis.from_url(REDIS_URL, decode_responses=True)
 
 
+def _normalize_target(params: dict[str, Any]) -> str:
+    """The LLM sends the target as `service` (per tool schema); accept `flag` too."""
+    return str(params.get("service") or params.get("flag") or "").strip()
+
+
+async def _error_count(service: str, minutes: int = 2) -> int | None:
+    """Query SigNoz for the service's recent error count. None if unparseable."""
+    try:
+        from tools_rest import signoz_aggregate_traces
+
+        raw = await signoz_aggregate_traces(
+            aggregate_operator="count",
+            filters=[
+                {
+                    "key": {"key": "service.name", "type": "resource", "dataType": "string"},
+                    "op": "=",
+                    "value": service,
+                },
+                {
+                    "key": {"key": "has_error", "type": "tag", "dataType": "bool"},
+                    "op": "=",
+                    "value": "true",
+                },
+            ],
+        )
+        data = json.loads(raw)
+        # Sum whatever numeric series values came back — shape-tolerant.
+        total = 0.0
+        found = False
+
+        def walk(node: Any) -> None:
+            nonlocal total, found
+            if isinstance(node, dict):
+                if "value" in node and isinstance(node["value"], (int, float)):
+                    total += float(node["value"])
+                    found = True
+                for v in node.values():
+                    walk(v)
+            elif isinstance(node, list):
+                for v in node:
+                    walk(v)
+
+        walk(data)
+        return int(total) if found else None
+    except Exception:
+        logger.exception("Error-count verification query failed for %s", service)
+        return None
+
+
 # ── Action implementations ──────────────────────────────────────
 
 
-async def rollback_run(service: str, **kwargs: Any) -> str:
-    """Rollback a service to its previous version via docker compose."""
-    target_version = kwargs.get("version", "1.4.1")
-    env = os.environ.copy()
-    env["CHECKOUT_VERSION"] = target_version
-    env["CHAOS_MODE"] = ""
+async def rollback_run(params: dict[str, Any]) -> str:
+    """Roll back checkout to the baseline version (Redis-driven deploy model)."""
+    service = _normalize_target(params) or "checkout"
+    if service not in ALLOWED_SERVICES:
+        return f"❌ Refusing rollback: '{service}' is not in the allowed service list."
 
-    logger.info("Rolling back %s to version %s", service, target_version)
-    try:
-        result = subprocess.run(
-            ["docker", "compose", "up", "-d", service],
-            env=env,
-            check=True,
-            capture_output=True,
-            text=True,
-            cwd="/app",
-        )
-        _emit_marker_log(service, target_version, "rollback")
+    r = await _get_redis()
+    await r.set("chaos:checkout-version", BASELINE_VERSION)
+    await r.delete("chaos:bad-deploy")
+    await r.aclose()
 
-        # Also clear the Redis chaos flag
-        r = await _get_redis()
-        await r.delete("chaos:bad-deploy")
-        await r.aclose()
-
-        return f"✅ Rolled back {service} to v{target_version}. Deployment marker emitted."
-    except subprocess.CalledProcessError as exc:
-        return f"❌ Rollback failed: {exc.stderr}"
-    except FileNotFoundError:
-        return "❌ docker compose not found in container"
+    _emit_marker_log(service, BASELINE_VERSION, "rollback")
+    return (
+        f"✅ Rolled back {service} to v{BASELINE_VERSION} "
+        f"(bad-deploy behavior disabled). Rollback marker emitted."
+    )
 
 
-async def rollback_verify(service: str, **kwargs: Any) -> str:
-    """Verify rollback by checking if error rate has dropped."""
-    logger.info("Waiting 60s before verification of %s rollback...", service)
+async def rollback_verify(params: dict[str, Any]) -> str:
+    """Verify rollback with data: re-query the service's error count after 60s."""
+    service = _normalize_target(params) or "checkout"
+    logger.info("Waiting 60s before verifying %s rollback...", service)
     await asyncio.sleep(60)
-    return f"✅ Verification: {service} rollback — monitoring for error rate recovery. Check SigNoz dashboard for confirmation."
+
+    errors = await _error_count(service)
+    if errors is None:
+        return (
+            f"⚠️ Verification query for {service} returned no parseable data — "
+            f"check the SigNoz dashboard manually."
+        )
+    if errors <= 2:
+        return f"✅ Verified: {service} error count in the last window is {errors} — recovery confirmed."
+    return f"⚠️ {service} still shows {errors} errors after rollback — needs a human look."
 
 
-async def disable_flag_run(flag: str, **kwargs: Any) -> str:
+async def disable_flag_run(params: dict[str, Any]) -> str:
     """Disable a feature/chaos flag via Redis."""
+    flag = _normalize_target(params)
+    if not flag:
+        return "❌ No flag name provided."
+    if flag not in KNOWN_FLAGS:
+        return f"❌ Refusing to touch unknown flag '{flag}'. Known flags: {sorted(KNOWN_FLAGS)}"
+
     r = await _get_redis()
     await r.delete(f"chaos:{flag}")
     await r.aclose()
@@ -115,8 +186,9 @@ async def disable_flag_run(flag: str, **kwargs: Any) -> str:
     return f"✅ Flag chaos:{flag} disabled."
 
 
-async def disable_flag_verify(flag: str, **kwargs: Any) -> str:
+async def disable_flag_verify(params: dict[str, Any]) -> str:
     """Verify the flag is disabled."""
+    flag = _normalize_target(params)
     await asyncio.sleep(30)
     r = await _get_redis()
     val = await r.get(f"chaos:{flag}")
@@ -126,28 +198,58 @@ async def disable_flag_verify(flag: str, **kwargs: Any) -> str:
     return f"⚠️ Flag chaos:{flag} still set: {val}"
 
 
-async def restart_run(service: str, **kwargs: Any) -> str:
-    """Restart a service via docker compose."""
-    logger.info("Restarting service: %s", service)
+def _find_container(service: str) -> str | None:
+    """Find a container ID by its compose service label (project-name agnostic)."""
     try:
-        result = subprocess.run(
-            ["docker", "compose", "restart", service],
+        out = subprocess.run(
+            ["docker", "ps", "-q", "-f", f"label=com.docker.compose.service={service}"],
             check=True,
             capture_output=True,
             text=True,
-            cwd="/app",
+            timeout=15,
         )
-        return f"✅ Restarted {service}."
-    except subprocess.CalledProcessError as exc:
-        return f"❌ Restart failed: {exc.stderr}"
-    except FileNotFoundError:
-        return "❌ docker compose not found in container"
+        container_id = out.stdout.strip().splitlines()
+        return container_id[0] if container_id else None
+    except (subprocess.SubprocessError, FileNotFoundError):
+        return None
 
 
-async def restart_verify(service: str, **kwargs: Any) -> str:
-    """Verify service is healthy after restart."""
+async def restart_run(params: dict[str, Any]) -> str:
+    """Restart a sandbox service container via the docker socket."""
+    service = _normalize_target(params)
+    if service not in ALLOWED_SERVICES:
+        return f"❌ Refusing restart: '{service}' is not in the allowed service list."
+
+    container = await asyncio.to_thread(_find_container, service)
+    if container is None:
+        return f"❌ No running container found for service '{service}'."
+
+    def _restart() -> str:
+        try:
+            subprocess.run(
+                ["docker", "restart", container],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            return f"✅ Restarted {service} (container {container[:12]})."
+        except subprocess.SubprocessError as exc:
+            return f"❌ Restart failed: {exc}"
+        except FileNotFoundError:
+            return "❌ docker CLI not available in the agent container."
+
+    return await asyncio.to_thread(_restart)
+
+
+async def restart_verify(params: dict[str, Any]) -> str:
+    """Verify service came back after restart."""
+    service = _normalize_target(params)
     await asyncio.sleep(15)
-    return f"✅ {service} restart verification — service should be healthy. Check SigNoz for confirmation."
+    container = await asyncio.to_thread(_find_container, service)
+    if container:
+        return f"✅ {service} is running again (container {container[:12]})."
+    return f"⚠️ {service} container not found after restart — needs a human look."
 
 
 # ── Registry ────────────────────────────────────────────────────
@@ -175,15 +277,19 @@ async def execute_action(kind: str, params: dict[str, Any]) -> str:
     """Execute a remediation action by kind."""
     if kind not in REMEDIATION_REGISTRY:
         return f"❌ Unknown remediation kind: {kind}"
-
-    handler = REMEDIATION_REGISTRY[kind]
-    return await handler["run"](**params)
+    try:
+        return await REMEDIATION_REGISTRY[kind]["run"](params)
+    except Exception as exc:
+        logger.exception("Remediation %s failed", kind)
+        return f"❌ Remediation {kind} failed: {exc}"
 
 
 async def verify_action(kind: str, params: dict[str, Any]) -> str:
     """Verify a remediation action by kind."""
     if kind not in REMEDIATION_REGISTRY:
         return f"❌ Unknown remediation kind: {kind}"
-
-    handler = REMEDIATION_REGISTRY[kind]
-    return await handler["verify"](**params)
+    try:
+        return await REMEDIATION_REGISTRY[kind]["verify"](params)
+    except Exception as exc:
+        logger.exception("Verification for %s failed", kind)
+        return f"⚠️ Verification for {kind} failed: {exc}"

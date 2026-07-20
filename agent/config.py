@@ -19,6 +19,8 @@ class Settings(BaseSettings):
 
     # ── SigNoz ────────────────────────────────────────────────────
     signoz_url: str = "http://localhost:8080"
+    signoz_internal_url: str = "http://signoz:8080"
+    signoz_api_key: str = ""
     mcp_url: str = "http://mcp-server:8000"
 
     # ── Slack ─────────────────────────────────────────────────────
@@ -30,6 +32,9 @@ class Settings(BaseSettings):
     auto_approve: bool = False
     max_iterations: int = 20
     max_cost_usd_per_investigation: float = 1.00
+    # Alerts re-fire every eval interval; don't re-investigate the same alert
+    # until this many minutes have passed since the last investigation started.
+    investigation_cooldown_minutes: int = 15
 
     # ── Storage ───────────────────────────────────────────────────
     db_path: str = "/data/agentk.db"

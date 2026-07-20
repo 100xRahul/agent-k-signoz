@@ -7,6 +7,11 @@ Usage:
     python -m chaos flag-combo
     python -m chaos secret-leak
     python -m chaos resolve
+
+All scenarios are driven by Redis flags that the sandbox services check
+per-request — no container restarts needed. A "deploy" is modeled by the
+`chaos:checkout-version` key (checkout stamps it on every span), paired
+with a deployment-marker log emitted from service.name=deploy-bot.
 """
 
 from __future__ import annotations
@@ -14,7 +19,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import subprocess
 import sys
 import time
 
@@ -26,6 +30,9 @@ logger = logging.getLogger("chaos")
 REDIS_URL = os.getenv("REDIS_URL", "redis://sandbox-redis:6379")
 OTEL_ENDPOINT = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://signoz-otel-collector:4317")
 
+BASELINE_VERSION = "1.4.1"
+BAD_VERSION = "1.4.2"
+
 SCENARIOS = {"bad-deploy", "pool-exhaustion", "flag-combo", "secret-leak", "resolve"}
 
 
@@ -34,8 +41,8 @@ def _redis_client() -> redis.Redis:
     return redis.from_url(REDIS_URL, decode_responses=True)
 
 
-def _emit_deployment_marker(service: str, version: str) -> None:
-    """Emit a deployment marker log line via OTLP.
+def _emit_deployment_marker(service: str, version: str, event: str = "deployment") -> None:
+    """Emit a deployment/rollback marker log line via OTLP.
 
     Uses the OTel SDK directly to send a single log record from service.name=deploy-bot.
     """
@@ -60,7 +67,7 @@ def _emit_deployment_marker(service: str, version: str) -> None:
 
         deploy_logger.info(
             json.dumps({
-                "event": "deployment",
+                "event": event,
                 "service": service,
                 "version": version,
                 "timestamp": time.time(),
@@ -70,7 +77,7 @@ def _emit_deployment_marker(service: str, version: str) -> None:
         # Flush to ensure the log is sent
         log_provider.force_flush()
         log_provider.shutdown()
-        logger.info("Deployment marker emitted: %s v%s", service, version)
+        logger.info("Marker emitted: %s %s v%s", event, service, version)
     except ImportError:
         logger.warning(
             "OTel SDK not available – skipping deployment marker. "
@@ -78,41 +85,19 @@ def _emit_deployment_marker(service: str, version: str) -> None:
         )
 
 
-def _docker_compose_restart_checkout(version: str, chaos_mode: str = "") -> None:
-    """Restart the checkout container with updated env."""
-    env = os.environ.copy()
-    env["CHECKOUT_VERSION"] = version
-    env["CHAOS_MODE"] = chaos_mode
-
-    logger.info("Restarting checkout: version=%s chaos_mode=%s", version, chaos_mode)
-    try:
-        subprocess.run(
-            ["docker", "compose", "up", "-d", "checkout"],
-            env=env,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        logger.info("Checkout restarted successfully")
-    except subprocess.CalledProcessError as exc:
-        logger.error("Failed to restart checkout: %s\n%s", exc, exc.stderr)
-    except FileNotFoundError:
-        logger.warning("docker compose not found – skipping container restart")
-
-
 def trigger_bad_deploy() -> None:
     """Trigger the bad-deploy scenario."""
     r = _redis_client()
+    r.set("chaos:checkout-version", BAD_VERSION)
     r.set("chaos:bad-deploy", "1")
-    logger.info("Redis flag chaos:bad-deploy SET")
+    logger.info("Redis: chaos:checkout-version=%s, chaos:bad-deploy=1", BAD_VERSION)
 
-    # Restart checkout with bad version
-    _docker_compose_restart_checkout(version="1.4.2", chaos_mode="bad-deploy")
+    _emit_deployment_marker(service="checkout", version=BAD_VERSION)
 
-    # Emit deployment marker
-    _emit_deployment_marker(service="checkout", version="1.4.2")
-
-    logger.info("🔥 bad-deploy scenario ACTIVE – checkout v1.4.2 with +800ms latency and 35%% error rate")
+    logger.info(
+        "🔥 bad-deploy scenario ACTIVE – checkout v%s with +800ms latency and 35%% error rate",
+        BAD_VERSION,
+    )
 
 
 def trigger_pool_exhaustion() -> None:
@@ -140,15 +125,14 @@ def resolve_all() -> None:
     """Clear all chaos flags and restore checkout to baseline."""
     r = _redis_client()
 
-    # Clear all chaos flags
     for flag in ["bad-deploy", "pool-exhaustion", "flag-combo", "secret-leak"]:
         r.delete(f"chaos:{flag}")
         logger.info("Cleared chaos:%s", flag)
 
-    # Restart checkout at baseline version
-    _docker_compose_restart_checkout(version="1.4.1", chaos_mode="")
+    r.set("chaos:checkout-version", BASELINE_VERSION)
+    _emit_deployment_marker(service="checkout", version=BASELINE_VERSION, event="rollback")
 
-    logger.info("✅ All chaos scenarios RESOLVED – checkout restored to v1.4.1")
+    logger.info("✅ All chaos scenarios RESOLVED – checkout restored to v%s", BASELINE_VERSION)
 
 
 DISPATCH: dict[str, callable] = {

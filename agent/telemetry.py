@@ -85,6 +85,9 @@ def setup_telemetry(app: Any | None = None) -> None:
     logger_provider = LoggerProvider(resource=resource)
     logger_provider.add_log_record_processor(BatchLogRecordProcessor(log_exporter))
     handler = LoggingHandler(level=logging.INFO, logger_provider=logger_provider)
+    # Root logger defaults to WARNING, which would swallow every logger.info
+    # in the agent — both on the console and in the OTLP export.
+    logging.basicConfig(level=logging.INFO)
     logging.getLogger().addHandler(handler)
 
     # ── FastAPI instrumentation ───────────────────────────────────

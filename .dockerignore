@@ -1,0 +1,9 @@
+.git
+deploy/
+reports/
+**/__pycache__/
+**/*.pyc
+.env
+PLAN.md
+IMPLEMENTATION.md
+README.md

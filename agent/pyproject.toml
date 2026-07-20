@@ -22,6 +22,6 @@ dependencies = [
     "pytest>=8.0,<9",
 ]
 
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+# App, not a distributable package — flat modules, run via uvicorn.
+[tool.uv]
+package = false

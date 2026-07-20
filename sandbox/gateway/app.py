@@ -8,7 +8,6 @@ from typing import Any
 
 import httpx
 from fastapi import FastAPI, Request, Response
-from opentelemetry import trace
 
 from telemetry import setup_telemetry
 
