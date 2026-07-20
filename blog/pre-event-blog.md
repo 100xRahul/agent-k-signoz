@@ -88,7 +88,7 @@ async def stamp_service_version(request, call_next):
     return await call_next(request)
 ```
 
-After that, rollout comparison worked exactly as advertised. SigNoz even warns you about this class of problem — my API responses included `"Key has_error is ambiguous, found 2 different combinations of field context / data type"` — read those warnings, they're telling the truth.
+Even after the fix there's a second layer: if a key has *ever* existed in both contexts, SigNoz resolves the bare name to the **resource** context by default — my group-by silently returned empty versions until I read the warning attached to the query response: *"Key 'service.version' is ambiguous… Using 'resource' context by default. To query attributes explicitly, use the fully qualified name (e.g., 'attribute.service.version')."* Qualified name in the group-by, and rollout comparison worked exactly as advertised. Read the warnings SigNoz attaches to results — every one I hit contained the exact fix.
 
 ## Alerts and dashboards as code (against the real API)
 

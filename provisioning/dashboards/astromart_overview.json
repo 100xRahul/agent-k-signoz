@@ -131,7 +131,7 @@
                                 },
                                 "groupBy": [
                                     {
-                                        "key": "service.version",
+                                        "key": "attribute.service.version",
                                         "type": "tag",
                                         "dataType": "string"
                                     }
