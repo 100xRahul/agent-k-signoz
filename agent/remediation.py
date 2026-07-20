@@ -142,25 +142,17 @@ async def _error_count(service: str, minutes: int = 2) -> int | None:
             resp.raise_for_status()
             data = resp.json()
 
-        # Sum whatever numeric aggregation values came back — shape-tolerant.
+        # Scalar rows come back as a list of rows, each a list of cells
+        # (e.g. [[2385]]); group-bys prepend label cells. Sum the numeric cells.
+        results = (data.get("data", {}).get("data") or {}).get("results")
+        if not isinstance(results, list) or not results:
+            return None
         total = 0.0
-        found = False
-
-        def walk(node: Any) -> None:
-            nonlocal total, found
-            if isinstance(node, dict):
-                for key, v in node.items():
-                    if key.startswith("__result") and isinstance(v, (int, float)):
-                        total += float(v)
-                        found = True
-                    else:
-                        walk(v)
-            elif isinstance(node, list):
-                for v in node:
-                    walk(v)
-
-        walk(data.get("data", {}))
-        return int(total) if found else None
+        for row in results[0].get("data") or []:
+            cells = row if isinstance(row, list) else [row]
+            total += sum(float(c) for c in cells if isinstance(c, (int, float)))
+        # An empty row set on a successful query is a real zero, not missing data.
+        return int(total)
     except Exception:
         logger.exception("Error-count verification query failed for %s", service)
         return None
