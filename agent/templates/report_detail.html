@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🕶️ Agent K — {{ investigation.root_cause or investigation.id }}</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #0d1117;
+            color: #c9d1d9;
+            font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+            padding: 2rem;
+            min-height: 100vh;
+            line-height: 1.6;
+        }
+        .breadcrumb {
+            margin-bottom: 1.5rem;
+        }
+        .breadcrumb a {
+            color: #58a6ff;
+            text-decoration: none;
+        }
+        .breadcrumb a:hover {
+            text-decoration: underline;
+        }
+        .breadcrumb span {
+            color: #8b949e;
+        }
+        .meta-bar {
+            display: flex;
+            gap: 1.5rem;
+            flex-wrap: wrap;
+            padding: 1rem;
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            margin-bottom: 2rem;
+            font-size: 0.85rem;
+        }
+        .meta-item {
+            display: flex;
+            flex-direction: column;
+            gap: 0.2rem;
+        }
+        .meta-item .label {
+            color: #8b949e;
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .meta-item .value {
+            color: #f0f6fc;
+            font-weight: 600;
+        }
+        .report-content {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            padding: 2rem;
+        }
+        .report-content h1 {
+            font-size: 1.5rem;
+            color: #f0f6fc;
+            margin-bottom: 1.5rem;
+            padding-bottom: 0.75rem;
+            border-bottom: 1px solid #30363d;
+        }
+        .report-content h2 {
+            font-size: 1.2rem;
+            color: #f0f6fc;
+            margin: 1.5rem 0 0.75rem 0;
+        }
+        .report-content p {
+            margin-bottom: 0.75rem;
+        }
+        .report-content ul, .report-content ol {
+            margin-left: 1.5rem;
+            margin-bottom: 0.75rem;
+        }
+        .report-content li {
+            margin-bottom: 0.3rem;
+        }
+        .report-content a {
+            color: #58a6ff;
+            text-decoration: none;
+        }
+        .report-content a:hover {
+            text-decoration: underline;
+        }
+        .report-content code {
+            background: #0d1117;
+            padding: 0.15rem 0.4rem;
+            border-radius: 4px;
+            font-size: 0.9em;
+            color: #f0883e;
+        }
+        .report-content pre {
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            padding: 1rem;
+            overflow-x: auto;
+            margin-bottom: 1rem;
+        }
+        .report-content pre code {
+            background: none;
+            padding: 0;
+            color: #c9d1d9;
+        }
+        .report-content strong {
+            color: #f0f6fc;
+        }
+        .report-content table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 1rem;
+        }
+        .report-content th, .report-content td {
+            padding: 0.5rem 0.75rem;
+            border: 1px solid #30363d;
+            text-align: left;
+        }
+        .report-content th {
+            background: #0d1117;
+            color: #f0f6fc;
+        }
+        .status-badge {
+            display: inline-block;
+            font-size: 0.75rem;
+            padding: 0.2rem 0.6rem;
+            border-radius: 12px;
+            font-weight: 600;
+        }
+        .status-done { background: #1b4332; color: #40c057; }
+        .status-running { background: #3d2e00; color: #ffc107; }
+        .status-failed { background: #3d0000; color: #ff6b6b; }
+    </style>
+</head>
+<body>
+    <div class="breadcrumb">
+        <a href="/reports">← Reports</a>
+        <span> / {{ investigation.id[:8] }}</span>
+    </div>
+
+    <div class="meta-bar">
+        <div class="meta-item">
+            <span class="label">Status</span>
+            <span class="status-badge status-{{ investigation.status }}">{{ investigation.status }}</span>
+        </div>
+        <div class="meta-item">
+            <span class="label">Started</span>
+            <span class="value">{{ investigation.started_at or 'N/A' }}</span>
+        </div>
+        <div class="meta-item">
+            <span class="label">Finished</span>
+            <span class="value">{{ investigation.finished_at or 'In progress...' }}</span>
+        </div>
+        <div class="meta-item">
+            <span class="label">Cost</span>
+            <span class="value">${{ '%.4f'|format(investigation.cost_usd or 0) }}</span>
+        </div>
+        <div class="meta-item">
+            <span class="label">Tokens (in/out)</span>
+            <span class="value">{{ investigation.tokens_in or 0 }} / {{ investigation.tokens_out or 0 }}</span>
+        </div>
+        {% if investigation.trace_id %}
+        <div class="meta-item">
+            <span class="label">Trace ID</span>
+            <span class="value"><a href="{{ signoz_url }}/trace/{{ investigation.trace_id }}">{{ investigation.trace_id[:16] }}...</a></span>
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="report-content">
+        {% if report_html %}
+            {{ report_html | safe }}
+        {% else %}
+            <p style="color: #8b949e;">Report content not available yet.</p>
+        {% endif %}
+    </div>
+</body>
+</html>

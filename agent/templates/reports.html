@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🕶️ Agent K — Investigation Reports</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #0d1117;
+            color: #c9d1d9;
+            font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+            padding: 2rem;
+            min-height: 100vh;
+        }
+        .header {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 2rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid #30363d;
+        }
+        .header h1 {
+            font-size: 1.8rem;
+            color: #f0f6fc;
+            font-weight: 600;
+        }
+        .header .subtitle {
+            color: #8b949e;
+            font-size: 0.9rem;
+        }
+        .stats {
+            display: flex;
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+        .stat-card {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            padding: 1rem 1.5rem;
+            min-width: 140px;
+        }
+        .stat-card .label {
+            color: #8b949e;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .stat-card .value {
+            font-size: 1.6rem;
+            font-weight: 700;
+            color: #f0f6fc;
+            margin-top: 0.3rem;
+        }
+        .investigations {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+        .investigation-card {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            padding: 1.25rem;
+            transition: border-color 0.2s;
+            text-decoration: none;
+            color: inherit;
+            display: block;
+        }
+        .investigation-card:hover {
+            border-color: #58a6ff;
+        }
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.5rem;
+        }
+        .card-title {
+            font-size: 1rem;
+            color: #58a6ff;
+            font-weight: 600;
+        }
+        .card-status {
+            font-size: 0.75rem;
+            padding: 0.2rem 0.6rem;
+            border-radius: 12px;
+            font-weight: 600;
+        }
+        .status-done { background: #1b4332; color: #40c057; }
+        .status-running { background: #3d2e00; color: #ffc107; }
+        .status-failed { background: #3d0000; color: #ff6b6b; }
+        .card-meta {
+            display: flex;
+            gap: 1.5rem;
+            color: #8b949e;
+            font-size: 0.8rem;
+            margin-top: 0.5rem;
+        }
+        .card-root-cause {
+            color: #c9d1d9;
+            font-size: 0.85rem;
+            margin-top: 0.5rem;
+        }
+        .empty-state {
+            text-align: center;
+            padding: 4rem;
+            color: #8b949e;
+        }
+        .empty-state .icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🕶️ Agent K</h1>
+        <span class="subtitle">Investigation Reports</span>
+    </div>
+
+    <div class="stats">
+        <div class="stat-card">
+            <div class="label">Total</div>
+            <div class="value">{{ investigations|length }}</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">Done</div>
+            <div class="value">{{ investigations|selectattr('status', 'equalto', 'done')|list|length }}</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">Running</div>
+            <div class="value">{{ investigations|selectattr('status', 'equalto', 'running')|list|length }}</div>
+        </div>
+    </div>
+
+    <div class="investigations">
+        {% if investigations %}
+            {% for inv in investigations %}
+            <a href="/reports/{{ inv.id }}" class="investigation-card">
+                <div class="card-header">
+                    <span class="card-title">{{ inv.root_cause or inv.id[:8] }}</span>
+                    <span class="card-status status-{{ inv.status }}">{{ inv.status }}</span>
+                </div>
+                {% if inv.root_cause %}
+                <div class="card-root-cause">{{ inv.root_cause }}</div>
+                {% endif %}
+                <div class="card-meta">
+                    <span>📅 {{ inv.started_at or 'N/A' }}</span>
+                    <span>💰 ${{ '%.4f'|format(inv.cost_usd or 0) }}</span>
+                    <span>🔤 {{ (inv.tokens_in or 0) + (inv.tokens_out or 0) }} tokens</span>
+                </div>
+            </a>
+            {% endfor %}
+        {% else %}
+            <div class="empty-state">
+                <div class="icon">🕶️</div>
+                <p>No investigations yet. Trigger one via webhook or <code>POST /investigate</code>.</p>
+            </div>
+        {% endif %}
+    </div>
+</body>
+</html>
