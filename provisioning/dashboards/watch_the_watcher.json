@@ -2,199 +2,352 @@
     "data": {
         "title": "Watch the Watcher",
         "description": "Meta-observability: Agent K's own performance, cost, and reliability metrics",
-        "tags": ["agent-k", "meta-observability"],
+        "tags": [
+            "agent-k",
+            "meta-observability"
+        ],
         "layout": [
-            {"i": "investigations-per-hour", "x": 0, "y": 0, "w": 4, "h": 3},
-            {"i": "time-to-rca", "x": 4, "y": 0, "w": 4, "h": 3},
-            {"i": "investigation-cost", "x": 8, "y": 0, "w": 4, "h": 3},
-            {"i": "tokens-per-investigation", "x": 0, "y": 3, "w": 6, "h": 3},
-            {"i": "tool-error-rate", "x": 6, "y": 3, "w": 6, "h": 3},
-            {"i": "llm-latency-p95", "x": 0, "y": 6, "w": 6, "h": 3},
-            {"i": "cost-by-model", "x": 6, "y": 6, "w": 6, "h": 3}
+            {
+                "i": "investigations-per-hour",
+                "x": 0,
+                "y": 0,
+                "w": 4,
+                "h": 3
+            },
+            {
+                "i": "time-to-rca",
+                "x": 4,
+                "y": 0,
+                "w": 4,
+                "h": 3
+            },
+            {
+                "i": "investigation-cost",
+                "x": 8,
+                "y": 0,
+                "w": 4,
+                "h": 3
+            },
+            {
+                "i": "tokens-per-investigation",
+                "x": 0,
+                "y": 3,
+                "w": 6,
+                "h": 3
+            },
+            {
+                "i": "tool-error-rate",
+                "x": 6,
+                "y": 3,
+                "w": 6,
+                "h": 3
+            },
+            {
+                "i": "llm-latency-p95",
+                "x": 0,
+                "y": 6,
+                "w": 6,
+                "h": 3
+            },
+            {
+                "i": "cost-by-model",
+                "x": 6,
+                "y": 6,
+                "w": 6,
+                "h": 3
+            }
         ],
         "widgets": [
             {
                 "id": "investigations-per-hour",
-                "title": "🔍 Investigations / Hour",
+                "title": "\ud83d\udd0d Investigations / Hour",
                 "panelTypes": "value",
                 "query": {
                     "queryType": "builder",
                     "builder": {
-                        "queryData": [{
-                            "dataSource": "metrics",
-                            "queryName": "A",
-                            "aggregateOperator": "rate",
-                            "aggregateAttribute": {"key": "agentk.investigations", "type": "Sum"},
-                            "expression": "A",
-                            "disabled": false
-                        }]
+                        "queryData": [
+                            {
+                                "dataSource": "metrics",
+                                "queryName": "A",
+                                "aggregateOperator": "rate",
+                                "aggregateAttribute": {
+                                    "key": "agentk.investigations",
+                                    "type": "Sum"
+                                },
+                                "expression": "A",
+                                "disabled": false
+                            }
+                        ]
                     }
                 }
             },
             {
                 "id": "time-to-rca",
-                "title": "⏱️ Time to RCA (p95)",
+                "title": "\u23f1\ufe0f Time to RCA (p95)",
                 "panelTypes": "value",
                 "query": {
                     "queryType": "builder",
                     "builder": {
-                        "queryData": [{
-                            "dataSource": "traces",
-                            "queryName": "A",
-                            "aggregateOperator": "p95",
-                            "aggregateAttribute": {"key": "duration_nano", "type": "tag", "dataType": "float64"},
-                            "filters": {
-                                "items": [{
-                                    "key": {"key": "service.name", "type": "resource", "dataType": "string"},
-                                    "op": "=",
-                                    "value": "agent-k"
-                                }, {
-                                    "key": {"key": "name", "type": "tag", "dataType": "string"},
-                                    "op": "=",
-                                    "value": "investigation"
-                                }],
-                                "op": "AND"
-                            },
-                            "expression": "A",
-                            "disabled": false
-                        }]
+                        "queryData": [
+                            {
+                                "dataSource": "traces",
+                                "queryName": "A",
+                                "aggregateOperator": "p95",
+                                "aggregateAttribute": {
+                                    "key": "duration_nano",
+                                    "type": "tag",
+                                    "dataType": "float64"
+                                },
+                                "filters": {
+                                    "items": [
+                                        {
+                                            "key": {
+                                                "key": "service.name",
+                                                "type": "resource",
+                                                "dataType": "string"
+                                            },
+                                            "op": "=",
+                                            "value": "agent-k"
+                                        },
+                                        {
+                                            "key": {
+                                                "key": "span.name",
+                                                "type": "tag",
+                                                "dataType": "string"
+                                            },
+                                            "op": "=",
+                                            "value": "investigation"
+                                        }
+                                    ],
+                                    "op": "AND"
+                                },
+                                "expression": "A",
+                                "disabled": false
+                            }
+                        ]
                     }
                 }
             },
             {
                 "id": "investigation-cost",
-                "title": "💰 Cost per Investigation",
+                "title": "\ud83d\udcb0 Cost per Investigation",
                 "panelTypes": "graph",
                 "query": {
                     "queryType": "builder",
                     "builder": {
-                        "queryData": [{
-                            "dataSource": "traces",
-                            "queryName": "A",
-                            "aggregateOperator": "avg",
-                            "aggregateAttribute": {"key": "agentk.total_cost_usd", "type": "tag", "dataType": "float64"},
-                            "filters": {
-                                "items": [{
-                                    "key": {"key": "service.name", "type": "resource", "dataType": "string"},
-                                    "op": "=",
-                                    "value": "agent-k"
-                                }],
-                                "op": "AND"
-                            },
-                            "expression": "A",
-                            "disabled": false
-                        }]
+                        "queryData": [
+                            {
+                                "dataSource": "traces",
+                                "queryName": "A",
+                                "aggregateOperator": "avg",
+                                "aggregateAttribute": {
+                                    "key": "agentk.total_cost_usd",
+                                    "type": "tag",
+                                    "dataType": "float64"
+                                },
+                                "filters": {
+                                    "items": [
+                                        {
+                                            "key": {
+                                                "key": "service.name",
+                                                "type": "resource",
+                                                "dataType": "string"
+                                            },
+                                            "op": "=",
+                                            "value": "agent-k"
+                                        }
+                                    ],
+                                    "op": "AND"
+                                },
+                                "expression": "A",
+                                "disabled": false
+                            }
+                        ]
                     }
                 }
             },
             {
                 "id": "tokens-per-investigation",
-                "title": "🔤 Tokens per Investigation",
+                "title": "\ud83d\udd24 Tokens per Investigation",
                 "panelTypes": "graph",
                 "query": {
                     "queryType": "builder",
                     "builder": {
-                        "queryData": [{
-                            "dataSource": "traces",
-                            "queryName": "A",
-                            "aggregateOperator": "sum",
-                            "aggregateAttribute": {"key": "gen_ai.usage.input_tokens", "type": "tag", "dataType": "float64"},
-                            "filters": {
-                                "items": [{
-                                    "key": {"key": "service.name", "type": "resource", "dataType": "string"},
-                                    "op": "=",
-                                    "value": "agent-k"
-                                }],
-                                "op": "AND"
-                            },
-                            "groupBy": [{"key": "gen_ai.request.model", "type": "tag", "dataType": "string"}],
-                            "expression": "A",
-                            "disabled": false
-                        }]
+                        "queryData": [
+                            {
+                                "dataSource": "traces",
+                                "queryName": "A",
+                                "aggregateOperator": "sum",
+                                "aggregateAttribute": {
+                                    "key": "gen_ai.usage.input_tokens",
+                                    "type": "tag",
+                                    "dataType": "float64"
+                                },
+                                "filters": {
+                                    "items": [
+                                        {
+                                            "key": {
+                                                "key": "service.name",
+                                                "type": "resource",
+                                                "dataType": "string"
+                                            },
+                                            "op": "=",
+                                            "value": "agent-k"
+                                        }
+                                    ],
+                                    "op": "AND"
+                                },
+                                "groupBy": [
+                                    {
+                                        "key": "gen_ai.request.model",
+                                        "type": "tag",
+                                        "dataType": "string"
+                                    }
+                                ],
+                                "expression": "A",
+                                "disabled": false
+                            }
+                        ]
                     }
                 }
             },
             {
                 "id": "tool-error-rate",
-                "title": "🔧 Tool Error Rate",
+                "title": "\ud83d\udd27 Tool Error Rate",
                 "panelTypes": "graph",
                 "query": {
                     "queryType": "builder",
                     "builder": {
-                        "queryData": [{
-                            "dataSource": "traces",
-                            "queryName": "A",
-                            "aggregateOperator": "rate",
-                            "aggregateAttribute": {"key": "", "type": "tag", "dataType": "string"},
-                            "filters": {
-                                "items": [{
-                                    "key": {"key": "service.name", "type": "resource", "dataType": "string"},
-                                    "op": "=",
-                                    "value": "agent-k"
-                                }, {
-                                    "key": {"key": "has_error", "type": "tag", "dataType": "bool"},
-                                    "op": "=",
-                                    "value": "true"
-                                }, {
-                                    "key": {"key": "name", "type": "tag", "dataType": "string"},
-                                    "op": "startsWith",
-                                    "value": "tool."
-                                }],
-                                "op": "AND"
-                            },
-                            "expression": "A",
-                            "disabled": false
-                        }]
+                        "queryData": [
+                            {
+                                "dataSource": "traces",
+                                "queryName": "A",
+                                "aggregateOperator": "rate",
+                                "aggregateAttribute": {
+                                    "key": "",
+                                    "type": "tag",
+                                    "dataType": "string"
+                                },
+                                "filters": {
+                                    "items": [
+                                        {
+                                            "key": {
+                                                "key": "service.name",
+                                                "type": "resource",
+                                                "dataType": "string"
+                                            },
+                                            "op": "=",
+                                            "value": "agent-k"
+                                        },
+                                        {
+                                            "key": {
+                                                "key": "has_error",
+                                                "type": "tag",
+                                                "dataType": "bool"
+                                            },
+                                            "op": "=",
+                                            "value": "true"
+                                        },
+                                        {
+                                            "key": {
+                                                "key": "span.name",
+                                                "type": "tag",
+                                                "dataType": "string"
+                                            },
+                                            "op": "like",
+                                            "value": "tool.%"
+                                        }
+                                    ],
+                                    "op": "AND"
+                                },
+                                "expression": "A",
+                                "disabled": false
+                            }
+                        ]
                     }
                 }
             },
             {
                 "id": "llm-latency-p95",
-                "title": "🧠 LLM Latency P95",
+                "title": "\ud83e\udde0 LLM Latency P95",
                 "panelTypes": "graph",
                 "query": {
                     "queryType": "builder",
                     "builder": {
-                        "queryData": [{
-                            "dataSource": "traces",
-                            "queryName": "A",
-                            "aggregateOperator": "p95",
-                            "aggregateAttribute": {"key": "duration_nano", "type": "tag", "dataType": "float64"},
-                            "filters": {
-                                "items": [{
-                                    "key": {"key": "service.name", "type": "resource", "dataType": "string"},
-                                    "op": "=",
-                                    "value": "agent-k"
-                                }, {
-                                    "key": {"key": "name", "type": "tag", "dataType": "string"},
-                                    "op": "=",
-                                    "value": "llm.call"
-                                }],
-                                "op": "AND"
-                            },
-                            "groupBy": [{"key": "gen_ai.request.model", "type": "tag", "dataType": "string"}],
-                            "expression": "A",
-                            "disabled": false
-                        }]
+                        "queryData": [
+                            {
+                                "dataSource": "traces",
+                                "queryName": "A",
+                                "aggregateOperator": "p95",
+                                "aggregateAttribute": {
+                                    "key": "duration_nano",
+                                    "type": "tag",
+                                    "dataType": "float64"
+                                },
+                                "filters": {
+                                    "items": [
+                                        {
+                                            "key": {
+                                                "key": "service.name",
+                                                "type": "resource",
+                                                "dataType": "string"
+                                            },
+                                            "op": "=",
+                                            "value": "agent-k"
+                                        },
+                                        {
+                                            "key": {
+                                                "key": "span.name",
+                                                "type": "tag",
+                                                "dataType": "string"
+                                            },
+                                            "op": "=",
+                                            "value": "llm.call"
+                                        }
+                                    ],
+                                    "op": "AND"
+                                },
+                                "groupBy": [
+                                    {
+                                        "key": "gen_ai.request.model",
+                                        "type": "tag",
+                                        "dataType": "string"
+                                    }
+                                ],
+                                "expression": "A",
+                                "disabled": false
+                            }
+                        ]
                     }
                 }
             },
             {
                 "id": "cost-by-model",
-                "title": "💵 Cumulative Cost by Model",
+                "title": "\ud83d\udcb5 Cumulative Cost by Model",
                 "panelTypes": "graph",
                 "query": {
                     "queryType": "builder",
                     "builder": {
-                        "queryData": [{
-                            "dataSource": "metrics",
-                            "queryName": "A",
-                            "aggregateOperator": "sum",
-                            "aggregateAttribute": {"key": "agentk.cost.usd", "type": "Sum"},
-                            "groupBy": [{"key": "model", "type": "tag", "dataType": "string"}],
-                            "expression": "A",
-                            "disabled": false
-                        }]
+                        "queryData": [
+                            {
+                                "dataSource": "metrics",
+                                "queryName": "A",
+                                "aggregateOperator": "sum",
+                                "aggregateAttribute": {
+                                    "key": "agentk.cost.usd",
+                                    "type": "Sum"
+                                },
+                                "groupBy": [
+                                    {
+                                        "key": "model",
+                                        "type": "tag",
+                                        "dataType": "string"
+                                    }
+                                ],
+                                "expression": "A",
+                                "disabled": false
+                            }
+                        ]
                     }
                 }
             }
