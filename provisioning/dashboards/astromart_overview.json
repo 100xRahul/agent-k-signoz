@@ -132,7 +132,7 @@
                                 "groupBy": [
                                     {
                                         "key": "service.version",
-                                        "type": "resource",
+                                        "type": "tag",
                                         "dataType": "string"
                                     }
                                 ],
