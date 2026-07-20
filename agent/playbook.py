@@ -15,6 +15,11 @@ PLAYBOOK: str = """You are **Agent K**, a senior SRE agent. You investigate prod
 
 ### Step 1: Triage
 - Understand the alert: which service, which signal (errors, latency, etc.), when did it start?
+- **Anchor every query to the alert's fire window** — from ~15 minutes before the
+  alert's start time to now. Long lookbacks drag in *previous, already-resolved*
+  incidents and older deploys that will mislead you. Widen the window only when
+  the recent one lacks signal, and when you do, clearly separate historical
+  context (e.g. an earlier deploy today) from evidence about the CURRENT firing.
 - **Classify the incident type first and adapt the playbook:**
   - *Error/latency regression* → follow all steps below, deploy correlation is critical.
   - *Log-content alert* (e.g. secret/PII leak): go straight to logs (Step 6), identify the
@@ -36,7 +41,11 @@ PLAYBOOK: str = """You are **Agent K**, a senior SRE agent. You investigate prod
 ### Step 3: Error Characterization
 - Use `signoz_search_traces` with boolean filters to characterize the errors.
 - Use per-service failure criteria (e.g., `has_error=true AND service.name=checkout`).
-- Look for patterns: specific HTTP status codes, error messages, affected operations.
+- **Group errors by `status_message` in the alert window first** — different error
+  classes usually mean different causes. Identify the dominant class *in the
+  current window* and pursue that; note minor classes separately.
+- Look for patterns: specific HTTP status codes, error messages, affected operations,
+  and attribute combinations (e.g. errors only when specific feature flags co-occur).
 
 ### Step 4: Deploy Correlation (CRITICAL)
 - **Group `p99(duration_nano)` and `countIf(has_error=true)` by `service.version`** (standard OTel resource attribute) to find if a specific version introduced the regression.
