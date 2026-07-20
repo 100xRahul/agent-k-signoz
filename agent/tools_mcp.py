@@ -88,32 +88,6 @@ class MCPClient:
                 await session.initialize()
                 yield MCPToolSession(session)
 
-
-class MCPToolSession:
-    """A live MCP session; call_tool returns error strings (never raises) so
-    the agent loop can surface tool failures to the model."""
-
-    def __init__(self, session: ClientSession) -> None:
-        self._session = session
-
-    async def call_tool(self, name: str, args: dict[str, Any]) -> str:
-        try:
-            result = await self._session.call_tool(name, args)
-            parts: list[str] = []
-            for content in result.content:
-                if hasattr(content, "text"):
-                    parts.append(content.text)
-                else:
-                    parts.append(str(content))
-            output = "\n".join(parts)
-            if len(output) > 15000:
-                output = output[:15000] + "\n... [truncated]"
-            return output
-        except Exception as exc:
-            error_msg = f"MCP tool call '{name}' failed: {exc}"
-            logger.exception(error_msg)
-            return error_msg
-
     async def get_openai_tools(self) -> list[dict[str, Any]]:
         """Convert MCP tool schemas to OpenAI function-calling format."""
         mcp_tools = await self.list_tools()
@@ -141,6 +115,32 @@ class MCPToolSession:
             )
 
         return openai_tools
+
+
+class MCPToolSession:
+    """A live MCP session; call_tool returns error strings (never raises) so
+    the agent loop can surface tool failures to the model."""
+
+    def __init__(self, session: ClientSession) -> None:
+        self._session = session
+
+    async def call_tool(self, name: str, args: dict[str, Any]) -> str:
+        try:
+            result = await self._session.call_tool(name, args)
+            parts: list[str] = []
+            for content in result.content:
+                if hasattr(content, "text"):
+                    parts.append(content.text)
+                else:
+                    parts.append(str(content))
+            output = "\n".join(parts)
+            if len(output) > 15000:
+                output = output[:15000] + "\n... [truncated]"
+            return output
+        except Exception as exc:
+            error_msg = f"MCP tool call '{name}' failed: {exc}"
+            logger.exception(error_msg)
+            return error_msg
 
 
 # Singleton

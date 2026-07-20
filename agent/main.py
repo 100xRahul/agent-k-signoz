@@ -50,6 +50,11 @@ def should_investigate(alertname: str, alert_status: str) -> tuple[bool, str]:
         return False, "investigation already running"
 
     latest = store.latest_investigation_for_alert(alertname)
+    # A failed run must not suppress retrying a still-firing alert — the
+    # cooldown exists to stop re-investigating *answered* incidents, not to
+    # silence the agent after its own crash.
+    if latest and latest.get("status") == "failed":
+        return True, "retrying after failed investigation"
     if latest and latest.get("started_at"):
         try:
             started = datetime.fromisoformat(latest["started_at"])

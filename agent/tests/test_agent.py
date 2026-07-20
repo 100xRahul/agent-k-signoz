@@ -8,6 +8,17 @@ from models import AlertmanagerWebhook, InvestigationTrigger
 from report import rewrite_signoz_links
 
 
+def test_agent_wiring():
+    """Interfaces the loop depends on must exist (guards against refactor drift)."""
+    import loop
+    import tools_mcp
+
+    assert callable(tools_mcp.mcp_client.get_openai_tools)
+    assert callable(tools_mcp.mcp_client.open_session)
+    assert callable(tools_mcp.MCPToolSession.call_tool)
+    assert callable(loop.run_investigation)
+
+
 def test_cost_calculation():
     """Test cost calculation in config Settings."""
     settings = Settings(
