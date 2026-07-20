@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from contextlib import asynccontextmanager
+from typing import Any, AsyncIterator
 
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
@@ -74,28 +75,40 @@ class MCPClient:
         logger.info("Loaded %d MCP tools (filtered from allowlist)", len(tools))
         return self._tools_cache
 
+    @asynccontextmanager
+    async def open_session(self) -> AsyncIterator["MCPToolSession"]:
+        """Open one MCP session to reuse across an investigation's tool calls.
+
+        A fresh HTTP session per tool call costs 3 round-trips each; an
+        investigation makes ~15 calls, so one shared session meaningfully
+        cuts time-to-RCA.
+        """
+        async with streamablehttp_client(self._mcp_url) as (read, write, _):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                yield MCPToolSession(session)
+
+
+class MCPToolSession:
+    """A live MCP session; call_tool returns error strings (never raises) so
+    the agent loop can surface tool failures to the model."""
+
+    def __init__(self, session: ClientSession) -> None:
+        self._session = session
+
     async def call_tool(self, name: str, args: dict[str, Any]) -> str:
-        """Execute an MCP tool call and return the result as a string."""
         try:
-            async with streamablehttp_client(self._mcp_url) as (read, write, _):
-                async with ClientSession(read, write) as session:
-                    await session.initialize()
-                    result = await session.call_tool(name, args)
-
-                    # Combine all content parts
-                    parts: list[str] = []
-                    for content in result.content:
-                        if hasattr(content, "text"):
-                            parts.append(content.text)
-                        else:
-                            parts.append(str(content))
-
-                    output = "\n".join(parts)
-                    # Truncate to 15k chars as per spec
-                    if len(output) > 15000:
-                        output = output[:15000] + "\n... [truncated]"
-                    return output
-
+            result = await self._session.call_tool(name, args)
+            parts: list[str] = []
+            for content in result.content:
+                if hasattr(content, "text"):
+                    parts.append(content.text)
+                else:
+                    parts.append(str(content))
+            output = "\n".join(parts)
+            if len(output) > 15000:
+                output = output[:15000] + "\n... [truncated]"
+            return output
         except Exception as exc:
             error_msg = f"MCP tool call '{name}' failed: {exc}"
             logger.exception(error_msg)

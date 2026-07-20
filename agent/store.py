@@ -61,6 +61,13 @@ class Store:
                 FOREIGN KEY (investigation_id) REFERENCES investigations(id)
             );
         """)
+        # Migration: full LLM/tool transcript per investigation (audit trail).
+        cols = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(investigations)").fetchall()
+        }
+        if "transcript_json" not in cols:
+            conn.execute("ALTER TABLE investigations ADD COLUMN transcript_json TEXT")
         conn.commit()
 
     # ── Investigations ────────────────────────────────────────────
@@ -95,6 +102,7 @@ class Store:
             "tokens_in",
             "tokens_out",
             "trace_id",
+            "transcript_json",
         }
         fields = {k: v for k, v in kwargs.items() if k in allowed}
         if not fields:

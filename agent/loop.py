@@ -139,7 +139,7 @@ async def run_investigation(
         # Get tools — a failure here is fatal for the investigation, but must
         # still produce a failed record + report instead of a stuck "running" row.
         try:
-            sigtools, mcp = await _get_tools()
+            sigtools, _ = await _get_tools()
         except Exception as exc:
             logger.exception("Investigation %s could not load tools", investigation_id)
             store.update_investigation(
@@ -157,6 +157,36 @@ async def run_investigation(
             )
             return
         all_tools = sigtools + [FINISH_TOOL, REMEDIATION_TOOL]
+
+        # One MCP session for the whole investigation (~15 tool calls) instead
+        # of a fresh HTTP handshake per call.
+        from contextlib import AsyncExitStack
+
+        from tools_mcp import mcp_client
+
+        mcp_stack = AsyncExitStack()
+        try:
+            tool_session = await mcp_stack.enter_async_context(
+                mcp_client.open_session()
+            )
+        except Exception as exc:
+            logger.exception(
+                "Investigation %s could not open MCP session", investigation_id
+            )
+            store.update_investigation(
+                investigation_id,
+                status="failed",
+                finished_at=datetime.now(timezone.utc).isoformat(),
+                report_md=f"# ❌ Investigation Failed\n\nCould not open MCP session: {exc}",
+                root_cause="SigNoz MCP server unavailable",
+            )
+            set_investigation_result(
+                inv_span,
+                root_cause="SigNoz MCP server unavailable",
+                confidence="low",
+                total_cost_usd=0.0,
+            )
+            return
 
         # Initialize messages
         messages: list[dict[str, Any]] = [
@@ -329,7 +359,7 @@ async def run_investigation(
                     else:
                         args_summary = json.dumps(fn_args)[:500]
                         with tool_call_span(fn_name, args_summary) as t_span:
-                            result = await mcp.call_tool(fn_name, fn_args)
+                            result = await tool_session.call_tool(fn_name, fn_args)
                             result_bytes = len(result.encode("utf-8"))
                             is_error = result.startswith("MCP tool call") and (
                                 "failed" in result
@@ -377,6 +407,12 @@ async def run_investigation(
             root_cause = "Investigation failed due to internal error"
             confidence = "low"
 
+        # ── Close MCP session ─────────────────────────────────────
+        try:
+            await mcp_stack.aclose()
+        except Exception:
+            logger.warning("MCP session close failed", exc_info=True)
+
         # ── Persist results ───────────────────────────────────────
         duration = time.time() - start_time
         status = "done" if finished else "failed"
@@ -394,6 +430,8 @@ async def run_investigation(
             cost_usd=total_cost,
             tokens_in=total_tokens_in,
             tokens_out=total_tokens_out,
+            # Full audit trail: every prompt, tool call, and tool result.
+            transcript_json=json.dumps(messages),
         )
 
         # Set span attributes

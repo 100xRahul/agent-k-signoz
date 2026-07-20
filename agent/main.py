@@ -263,6 +263,16 @@ async def root() -> RedirectResponse:
     return RedirectResponse(url="/reports")
 
 
+@app.get("/reports/{investigation_id}/transcript")
+async def get_transcript(investigation_id: str) -> JSONResponse:
+    """Full LLM/tool transcript for an investigation — the audit trail."""
+    investigation = store.get_investigation(investigation_id)
+    if investigation is None:
+        raise HTTPException(status_code=404, detail="Investigation not found")
+    transcript = json.loads(investigation.get("transcript_json") or "[]")
+    return JSONResponse(content={"id": investigation_id, "transcript": transcript})
+
+
 @app.get("/healthz")
 async def healthz() -> dict[str, str]:
     return {"status": "ok", "service": "agent-k"}

@@ -1,4 +1,4 @@
-.PHONY: up down nuke provision logs check forge-signoz \
+.PHONY: up down nuke provision bootstrap logs check forge-signoz \
        incident-bad-deploy incident-pool incident-flags incident-leak resolve demo
 
 COMPOSE := docker compose
@@ -38,6 +38,11 @@ logs-%:
 	$(COMPOSE) logs -f $*
 
 # ──────────────────── Provisioning ────────────────────
+
+# First-boot SigNoz setup: admin account, service account, API key → .env.
+# Idempotent; run once after `make up` on a fresh clone.
+bootstrap:
+	python3 -m provisioning.bootstrap
 
 provision:
 	@echo "📊 Provisioning dashboards & alert rules..."
