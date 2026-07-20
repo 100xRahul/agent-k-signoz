@@ -58,13 +58,14 @@ The thing that made me stay up late wasn't the install — it was the new **v5 f
 service.name = 'checkout' AND has_error = true
 ```
 
-Aggregations are expressions too. Error count per minute for one service is `countIf(has_error = true)`; tail latency is `p99(duration_nano)`. The one that sold me completely — grouping by `service.version` to compare a rollout:
+Aggregations are expressions too — `count()`, `p99(duration_nano)`, `count_distinct(user.id)`. The combination that sold me completely — comparing a rollout by grouping error counts by `service.version`:
 
 ```
-countIf(has_error = true)  group by service.version
+count()  where service.name = 'checkout' AND has_error = true
+         group by service.version
 ```
 
-During a simulated bad deploy, this splits cleanly: v1.4.2 carrying all the errors, v1.4.1 clean. One query answers "did the deploy break it?"
+During a simulated bad deploy, this splits cleanly: v1.4.2 carrying all the errors, v1.4.1 flat at zero. One query answers "did the deploy break it?" (The API layer goes further than the explorer dropdowns expose — alert rules accept conditional aggregation expressions like `countIf(has_error = true)` directly, which I use below.)
 
 [SCREENSHOT: Traces explorer, group by service.version, showing errors concentrated on 1.4.2]
 
