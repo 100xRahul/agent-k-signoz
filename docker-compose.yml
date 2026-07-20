@@ -66,7 +66,10 @@ services:
     environment:
       - OTEL_SERVICE_NAME=checkout
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://signoz-otel-collector:4317
-      - OTEL_RESOURCE_ATTRIBUTES=deployment.environment=production,service.version=${CHECKOUT_VERSION:-1.4.1}
+      # No service.version here on purpose: checkout's version is dynamic
+      # (Redis-driven deploys) and stamped per-span; a static resource value
+      # would shadow the span attribute in group-by queries.
+      - OTEL_RESOURCE_ATTRIBUTES=deployment.environment=production
       - SERVICE_VERSION=${CHECKOUT_VERSION:-1.4.1}
       - CHAOS_MODE=${CHAOS_MODE:-}
       - PAYMENT_URL=http://payment:8003

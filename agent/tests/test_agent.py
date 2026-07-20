@@ -51,20 +51,28 @@ def test_rewrite_signoz_links():
 
     input_md = (
         "Check this trace: [trace](signoz://trace/a1b2c3d4e5f6)\n"
-        "Check the logs: [logs](signoz://logs/service=checkout)\n"
-        "Check the metrics: [metrics](signoz://metrics/service=payment)\n"
-        "Check explorer: [explorer](signoz://explorer/service=inventory)"
-    )
-
-    expected_output = (
-        "Check this trace: [trace](http://signoz-test.internal:8080/trace/a1b2c3d4e5f6)\n"
-        "Check the logs: [logs](http://signoz-test.internal:8080/logs-explorer?service=checkout)\n"
-        "Check the metrics: [metrics](http://signoz-test.internal:8080/metrics-explorer?service=payment)\n"
-        "Check explorer: [explorer](http://signoz-test.internal:8080/traces-explorer?service=inventory)"
+        "Errors: [explorer](signoz://explorer/traces?service.name = 'checkout' AND has_error = true)\n"
+        "Leaks: [logs](signoz://explorer/logs?body REGEXP 'AKIA')\n"
+        "All traces: [explorer](signoz://explorer/traces)"
     )
 
     output_md = rewrite_signoz_links(input_md)
-    assert output_md == expected_output
+    lines = output_md.splitlines()
+
+    # Trace link is a plain rewrite
+    assert "(http://signoz-test.internal:8080/trace/a1b2c3d4e5f6)" in lines[0]
+
+    # Explorer links carry a double-encoded compositeQuery with the filter,
+    # target the right explorer route, and contain no spaces (valid markdown URL)
+    assert "/traces-explorer?compositeQuery=" in lines[1]
+    assert "has_error" in lines[1]
+    assert " " not in lines[1].split("(")[1].rstrip(")")
+    assert "/logs-explorer?compositeQuery=" in lines[2]
+    assert "AKIA" in lines[2]
+    assert "/traces-explorer?compositeQuery=" in lines[3]
+
+    # No unrewritten placeholders remain
+    assert "signoz://" not in output_md
 
 
 def test_md_to_mrkdwn():

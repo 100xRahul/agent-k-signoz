@@ -79,6 +79,20 @@ async def _current_version() -> str:
 # ── Main endpoint ─────────────────────────────────────────────────
 
 
+@app.middleware("http")
+async def stamp_service_version(request: Request, call_next):
+    """Stamp the *current* deployed version on the request's root span.
+
+    Checkout's version is dynamic (Redis-driven deploys), so it can't live in
+    the static OTel resource — every span must carry it as a span attribute
+    for rollout-comparison queries to see version changes without restarts.
+    """
+    span = trace.get_current_span()
+    if span and span.is_recording():
+        span.set_attribute("service.version", await _current_version())
+    return await call_next(request)
+
+
 @app.post("/checkout")
 async def checkout(request: Request) -> JSONResponse:
     """Process an order: call payment then reserve inventory."""

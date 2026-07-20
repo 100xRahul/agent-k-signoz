@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import re
+import time
+import urllib.parse
 from typing import Any
 
 import markdown as md
@@ -15,37 +18,67 @@ from config import settings
 
 def link_trace(trace_id: str) -> str:
     """Generate a SigNoz trace deep link."""
-    return f"{settings.signoz_url}/trace/{trace_id}"
+    return f"{settings.signoz_url.rstrip('/')}/trace/{trace_id}"
 
 
 def link_explorer(
-    data_source: str = "traces",
-    filters: dict[str, str] | None = None,
+    signal: str = "traces",
+    filter_expression: str = "",
+    minutes: int = 60,
 ) -> str:
-    """Generate a SigNoz explorer deep link."""
-    base = f"{settings.signoz_url}/traces-explorer"
-    if data_source == "logs":
-        base = f"{settings.signoz_url}/logs-explorer"
-    elif data_source == "metrics":
-        base = f"{settings.signoz_url}/metrics-explorer"
+    """Generate a SigNoz explorer deep link with a working filter.
 
-    if filters:
-        params = "&".join(f"{k}={v}" for k, v in filters.items())
-        return f"{base}?{params}"
-    return base
+    The explorer reads its state from a `compositeQuery` URL param carrying a
+    (double-URL-encoded) builder query whose filter is a v5 expression string.
+    """
+    base = settings.signoz_url.rstrip("/")
+    route = {
+        "traces": "/traces-explorer",
+        "logs": "/logs-explorer",
+        "metrics": "/metrics-explorer",
+    }.get(signal, "/traces-explorer")
+
+    query_data: dict[str, Any] = {
+        "queryName": "A",
+        "dataSource": signal if signal in ("traces", "logs", "metrics") else "traces",
+        "aggregateOperator": "noop",
+        "aggregateAttribute": {"key": ""},
+        "expression": "A",
+        "disabled": False,
+    }
+    if filter_expression:
+        query_data["filter"] = {"expression": filter_expression}
+
+    composite = {
+        "queryType": "builder",
+        "builder": {"queryData": [query_data], "queryFormulas": []},
+    }
+    # The UI expects the JSON percent-encoded twice (%2522 for a quote).
+    encoded = urllib.parse.quote(
+        urllib.parse.quote(json.dumps(composite), safe=""), safe=""
+    )
+
+    end_ns = int(time.time() * 1_000_000_000)
+    start_ns = end_ns - minutes * 60 * 1_000_000_000
+    return (
+        f"{base}{route}?compositeQuery={encoded}&startTime={start_ns}&endTime={end_ns}"
+    )
 
 
 # ── signoz:// placeholder rewriting ──────────────────────────────
+
+_EXPLORER_RE = re.compile(r"signoz://explorer/(traces|logs|metrics)\?([^)\n]*)")
 
 
 def rewrite_signoz_links(report_md: str) -> str:
     """Rewrite signoz:// placeholder URLs to real SigNoz URLs.
 
-    Handles:
-      signoz://trace/<trace_id> -> {SIGNOZ_URL}/trace/<trace_id>
-      signoz://explorer/<params> -> {SIGNOZ_URL}/traces-explorer?<params>
-      signoz://logs/<params> -> {SIGNOZ_URL}/logs-explorer?<params>
-      signoz://metrics/<params> -> {SIGNOZ_URL}/metrics-explorer?<params>
+    Grammar the LLM is instructed to use (see playbook):
+      signoz://trace/<trace_id>
+      signoz://explorer/<traces|logs|metrics>?<filter expression>
+
+    The filter expression is plain v5 filter syntax (spaces and quotes fine —
+    it gets URL-encoded here, so the final markdown link is valid).
     """
     base = settings.signoz_url.rstrip("/")
 
@@ -56,28 +89,23 @@ def rewrite_signoz_links(report_md: str) -> str:
         report_md,
     )
 
-    # Explorer links
+    # Explorer links with filter expressions
+    def _explorer_sub(m: re.Match[str]) -> str:
+        signal = m.group(1)
+        expr = m.group(2).strip()
+        return link_explorer(signal, expr)
+
+    report_md = _EXPLORER_RE.sub(_explorer_sub, report_md)
+
+    # Bare explorer links without a filter
     report_md = re.sub(
-        r"signoz://explorer/?(.*?)\)",
-        rf"{base}/traces-explorer?\1)",
+        r"signoz://explorer/(traces|logs|metrics)",
+        lambda m: link_explorer(m.group(1)),
         report_md,
     )
 
-    # Logs links
-    report_md = re.sub(
-        r"signoz://logs/?(.*?)\)",
-        rf"{base}/logs-explorer?\1)",
-        report_md,
-    )
-
-    # Metrics links
-    report_md = re.sub(
-        r"signoz://metrics/?(.*?)\)",
-        rf"{base}/metrics-explorer?\1)",
-        report_md,
-    )
-
-    # Catch-all: any remaining signoz:// URLs
+    # Catch-all: any remaining signoz:// URLs land on the SigNoz home page
+    # rather than a broken scheme.
     report_md = report_md.replace("signoz://", f"{base}/")
 
     return report_md
