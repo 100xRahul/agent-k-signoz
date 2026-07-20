@@ -32,15 +32,18 @@ An autonomous on-call SRE agent that investigates production incidents through S
 cp .env.example .env
 # Edit .env: add OPENAI_API_KEY + SLACK_WEBHOOK_URL
 
-# 2. Start everything
+# 2. Start everything (SigNoz self-host via committed Foundry manifests + the stack)
 make up
-# → SigNoz UI at http://localhost:8080
-# → Create API key in SigNoz Settings → API Keys, add to .env as SIGNOZ_API_KEY
-# → Restart: make down && make up
 
-# 3. Provision & demo
+# 3. First-boot SigNoz setup — admin account, service account, API key → .env, automatic
+make bootstrap
+docker compose up -d mcp-server agent   # pick up the new API key
+
+# 4. Alerts + dashboards as code, then a scripted incident
 make provision && make demo
 ```
+
+SigNoz UI: http://localhost:8080 (login saved to `~/signoz-login.txt` by bootstrap) · Agent K reports: http://localhost:9000/reports
 
 ## 📊 Incident Scenarios
 
@@ -96,8 +99,7 @@ agent-k/
 │  ├─ main.py                  # FastAPI endpoints
 │  ├─ loop.py                  # Agent reasoning loop
 │  ├─ playbook.py              # SRE investigation runbook
-│  ├─ tools_mcp.py             # SigNoz MCP client
-│  ├─ tools_rest.py            # REST fallback
+│  ├─ tools_mcp.py             # SigNoz MCP client (the only tool path — fail loud)
 │  ├─ remediation.py           # Guarded actions
 │  ├─ telemetry.py             # gen_ai OTel spans + cost
 │  ├─ report.py                # RCA report generation
