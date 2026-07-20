@@ -1,0 +1,35 @@
+{
+  "receiver": "agent-k-webhook",
+  "status": "firing",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "checkout-error-rate",
+        "service": "checkout",
+        "severity": "critical"
+      },
+      "annotations": {
+        "summary": "Checkout error rate exceeds 10%",
+        "description": "The checkout service is experiencing elevated error rates."
+      },
+      "startsAt": "2026-07-14T22:30:00Z",
+      "endsAt": "",
+      "generatorURL": "http://localhost:8080/alert/123",
+      "fingerprint": "xyz123"
+    }
+  ],
+  "groupLabels": {
+    "alertname": "checkout-error-rate"
+  },
+  "commonLabels": {
+    "alertname": "checkout-error-rate",
+    "service": "checkout"
+  },
+  "commonAnnotations": {
+    "summary": "Checkout error rate exceeds 10%"
+  },
+  "externalURL": "http://localhost:8080",
+  "version": "4",
+  "groupKey": "checkout-error-rate"
+}
