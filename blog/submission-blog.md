@@ -5,7 +5,7 @@ tags: observability, opentelemetry, ai, signoz
 ---
 
 > **Agents of SigNoz** hackathon (WeMakeDevs × SigNoz). Track 1: AI & Agent Observability.
-> Repo: https://github.com/100xRahul/agent-k-signoz · Demo video: _<add your YouTube link>_
+> Repo: https://github.com/100xRahul/agent-k-signoz · Demo video: https://www.youtube.com/watch?v=nJuPxC2Ldyo
 
 I set out to build an AI agent that investigates production incidents. The part I expected to be hard — getting an LLM to reason over traces and logs — turned out to be the easy 20%. The hard 80% was making the agent **trustworthy enough to point at production**: proving its answers are grounded in real telemetry, and making the agent itself observable. This post is about the two bugs that taught me that, and how SigNoz ended up being both the agent's eyes and its accountability layer.
 
