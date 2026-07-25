@@ -1,101 +1,92 @@
-# I Built an AI SRE That Debugs Through SigNoz — and SigNoz Watches It Back
-
-> **Agents of SigNoz** hackathon submission (WeMakeDevs × SigNoz, July 2026) · Track 1: AI & Agent Observability
-> Repo: https://github.com/100xRahul/agent-k-signoz · Demo: _<add your YouTube link>_
-
+---
+title: "I built an AI SRE that debugs through SigNoz — and the hardest part wasn't the AI"
+published: false
+tags: observability, opentelemetry, ai, signoz
 ---
 
-## The 3 AM problem
+> **Agents of SigNoz** hackathon (WeMakeDevs × SigNoz). Track 1: AI & Agent Observability.
+> Repo: https://github.com/100xRahul/agent-k-signoz · Demo video: _<add your YouTube link>_
 
-Every on-call engineer knows the drill. An alert fires. You open your observability tool, and then you start _pivoting_ — traces here, logs there, a metrics dashboard in another tab, the deploy timeline in a fourth. You hold the whole incident in your head while you correlate it by hand, half-awake, hoping you don't miss the one span that explains everything.
+I set out to build an AI agent that investigates production incidents. The part I expected to be hard — getting an LLM to reason over traces and logs — turned out to be the easy 20%. The hard 80% was making the agent **trustworthy enough to point at production**: proving its answers are grounded in real telemetry, and making the agent itself observable. This post is about the two bugs that taught me that, and how SigNoz ended up being both the agent's eyes and its accountability layer.
 
-AI agents are supposed to automate exactly this kind of drudgery. But an agent turned loose on production is only trustworthy if two things are true: it's **grounded in real telemetry** (not vibes), and it's **as observable as the systems it debugs** (so you can see what it did, what it cost, and why it decided what it decided).
+## What I built
 
-So I built **Agent K** — an autonomous SRE sidekick that investigates incidents _through_ SigNoz, and is _itself_ fully instrumented back _into_ the same SigNoz instance.
+**Agent K** is an autonomous on-call SRE. A SigNoz alert fires → a webhook wakes the agent → it investigates through the official **SigNoz MCP server** → it posts a root-cause analysis with business blast radius to Slack → it proposes a guarded remediation behind a one-click approval → and every step it takes is emitted as OpenTelemetry back into the *same* SigNoz instance.
 
-**SigNoz observes the agent that observes SigNoz.**
+That last clause is the whole idea: **SigNoz observes the agent that observes SigNoz.**
 
-## What Agent K does, end to end
+To make this real instead of a toy, I built a small demo shop — "AstroMart," four FastAPI services (gateway → checkout → payment → inventory) with Postgres and Redis — instrumented with OpenTelemetry, plus a chaos CLI that injects five distinct failure signatures (a bad deploy, DB pool exhaustion, a feature-flag conflict, a secret leak, and a healthy control).
 
-1. A SigNoz **alert** fires (e.g. checkout error-rate > 10%).
-2. SigNoz's notification webhook wakes Agent K.
-3. The agent runs an LLM tool-use loop, investigating **entirely through the official SigNoz MCP server** — listing services, aggregating traces, drilling into logs, running Query Builder v5 aggregations, correlating deploy markers.
-4. It writes a **root-cause analysis** with a business blast radius (dollars of failed orders, affected users) and posts it to **Slack** with SigNoz deep links.
-5. It proposes a **guarded remediation** (rollback / disable-flag / restart) behind an HMAC-signed approval link. A human clicks; the agent executes and then **re-queries SigNoz to verify** the fix worked.
-6. Every step of that — every LLM call, every tool call, the cost, the verdict — is emitted as OpenTelemetry back into SigNoz, using the `gen_ai` semantic conventions.
+> 🖼️ **[IMAGE 1 — Architecture diagram]** _(the mermaid block below renders on Dev.to; on Medium, screenshot it)_
 
-To make this real (not a toy), the project ships **AstroMart**, a 4-service FastAPI microshop (gateway → checkout → payment → inventory, plus Postgres and Redis) with a steady load generator and a chaos CLI that injects five distinct failure signatures.
-
-## How I used SigNoz (the whole surface)
-
-This is a SigNoz hackathon, so let me be explicit. SigNoz is both the **agent's data source** and its **observability backend**. Here's every feature and how it's used:
-
-| SigNoz feature | How Agent K uses it |
-|---|---|
-| **Self-hosted (Foundry)** | The whole SigNoz stack is forged by Foundry from a committed `casting.yaml` + `casting.yaml.lock`. Reproducible: judges can re-run Foundry against the repo. |
-| **Traces** | AstroMart's 4 services are OTel-instrumented; the agent's own investigation is a trace (`investigation` root span → `llm.call` and `tool.*` children). |
-| **Logs** | Structured JSON logs, deploy-bot markers, and a secret-leak scenario the agent finds via regex over log bodies. |
-| **Metrics** | Custom metrics: `agentk.investigations`, `agentk.cost.usd`, `agentk.investigation.duration`, and (new this week) `agentk.audit.groundedness`. |
-| **Query Builder v5** | The agent's investigation playbook is a QB v5 cheat-sheet: `countIf(has_error)/count()` error rates, `sumIf(order.total, has_error)` blast radius, `count_distinct(user.id)` impact, group-by `service.version` for rollout comparison, `CONTAINS`/`hasAll` for feature-flag isolation. A dedicated **QB v5 Rubric** dashboard showcases 11 of these. |
-| **Alerts** | 8 alert rules provisioned as code — error-rate %, p99 latency, flag-combo, payment timeouts, secret-leak, plus three that watch the agent itself. |
-| **Dashboards** | 4 dashboards: AstroMart Overview (RED + business metrics), QB v5 Rubric, **Watch the Watcher** (the agent's own performance/cost/groundedness), and LLM Cost Tracker. |
-| **Saved Explorer views** | 6 provisioned views (failing checkouts, slow checkout, secret-leak logs, deploy markers, the agent's LLM calls, its MCP tool calls). |
-| **MCP server** | The agent reads _all_ telemetry through the official SigNoz MCP server — 14 curated read-only tools over streamable HTTP. MCP is the **only** tool path; if it's down the investigation fails loudly rather than degrading silently. |
-| **gen_ai self-observability** | The agent emits `gen_ai.system`, `gen_ai.request.model`, `gen_ai.usage.*`, and `llm.cost.usd` on every LLM span — so its reasoning and spend are first-class, queryable SigNoz data. |
-
-The signature idea is that last row. Most "AI + observability" demos point an agent _at_ your telemetry. Agent K also publishes _itself_ into the telemetry. There's a self-investigating alert: `agentk-budget-spike` fires when the agent's own `agentk.cost.usd` rate crosses $2/hour — and when Agent K investigates _that_ alert, **it is investigating itself**, querying its own `llm.call` spans to find which alertname drove the spend.
-
-## The join is where the value is
-
-Neither the client-side symptom ("checkout is erroring") nor the server-side rollup is new on its own. The value is in **correlating them over the exact incident window**. Agent K's playbook anchors every query to the alert's fire window (≈15 min before start → now) so it doesn't drag in older, already-resolved incidents. Then it walks: top-N failing endpoints → error characterization by `status_message` → **deploy correlation by `service.version`** → an exemplar failing trace → logs drill-down → dollar/user blast radius → verdict. That turns "it got slower" into "checkout v1.4.2 introduced a 35% error rate at 14:02, $4,210 in failed orders across 37 users — roll it back."
-
-## Built during the hackathon week: measured, checked, provable
-
-The base agent existed before the event. During the hackathon window I added three things specifically to make the agent **credible** — each independently verifiable by a judge, and each leaning on SigNoz.
-
-### 1. An independent auditor that checks the writer
-
-An LLM writing an RCA can hallucinate a number. So after the writer finishes, a **second, independent model** — its own fresh context, no shared history — screens the report for **groundedness**: is every factual claim, especially every number, backed by the evidence the agent actually collected? It returns a verdict (`grounded` / `ungrounded` + the specific unsupported claims).
-
-It's advisory, not blocking — an ungrounded RCA still ships (an SRE needs the finding) but is **badged** at the top of the report and **counted**. The verdict becomes a `gen_ai`-style `audit.call` span, an `agentk.audit.groundedness` metric (by outcome), a panel on "Watch the Watcher", and an `agentk-ungrounded-rca` alert. The writer is checked, not trusted — and you watch that in SigNoz.
-
-### 2. A hash-chained audit ledger
-
-Every step Agent K takes — investigation start, each tool call (with a hash of the result it saw), each remediation proposal and execution, the audit verdict, the final verdict — is sealed into an **append-only, hash-chained ledger**: `entry_hash = sha256(prev_hash + canonical_payload)`. Any later edit to a row breaks the chain from that point on. `make verify-ledger` recomputes the whole chain and proves it wasn't tampered with. That's the governance guarantee that makes it safe to leave an autonomous agent pointed at production.
-
-### 3. A scored benchmark — because "measured" beats "demoed"
-
-I didn't want to _claim_ the agent finds root causes; I wanted to _measure_ it. `make benchmark` drives the real chaos + a firing webhook for each fault class, lets Agent K run its live investigation, then scores the **stored** verdict **deterministically** against ground truth: detection, localization (right service), classification (right fault signature), remediation (right guarded action), and groundedness. A **healthy control** measures the false-alarm rate — the agent must _not_ page when nothing is wrong. Because scoring keys on the right service + fault tokens + action (not on prose), a run **cannot pass on a hallucinated narrative**. Results land in `docs/benchmark/BENCHMARK.md`, reproducible with one command.
-
-## Guarded autonomy
-
-Autonomy is only safe if it's bounded. Agent K's remediation is allow-listed to three kinds (`rollback`, `disable_flag`, `restart`), each with a data-driven verify step that **re-queries SigNoz** after acting. A "deploy" is modeled as a Redis version flip (no docker-in-docker); only the `restart` action touches Docker, via a read-only socket and a compose-label lookup. Human approval is an HMAC-signed link — no Slack app required. And every investigation is bounded by an iteration cap, a per-investigation cost budget, and a guaranteed-report finish so no run ever ends empty.
-
-## Challenges
-
-- **Window precision.** Correlation only works if the SPL/QB window matches the incident exactly. Anchoring queries to the alert's fire window (and separating historical context from the current firing) was the difference between a right answer and a confidently wrong one.
-- **QB v5 span-attribute quirks.** `hasAll` applies to log-body JSON, not span attributes — so feature-flag isolation on spans uses `CONTAINS ... AND CONTAINS ...`. Ambiguous keys like `version` needed qualifying as `attribute.service.version`.
-- **Fail loud, not silent.** Early versions had a REST fallback when MCP was unavailable. I removed it: MCP is the only tool path, and if it's down the investigation is marked failed with a clear report. Silent degradation is worse than a loud failure.
-
-## What I learned
-
-Constraining an agent makes it _more_ useful, not less. A tight tool surface, deterministic work-phases, a cost budget, and an independent auditor are what make it safe to trust the output. And the most valuable observability signal is rarely a single metric — it's the **join**: pairing the client-side symptom with the server-side truth over the exact window is what turns telemetry into a root cause.
-
-## Reproduce it
-
-```bash
-cp .env.example .env          # add OPENAI_API_KEY (+ optional SLACK_WEBHOOK_URL)
-make up                       # SigNoz via committed Foundry manifests + the stack
-make bootstrap                # admin + service account + API key → .env
-make provision                # 8 alerts + 4 dashboards + 6 views, as code
-make demo                     # baseline traffic → bad-deploy incident → Agent K investigates
-
-make benchmark                # scored run: detection/localization/classification + 0% false alarms
-make verify-ledger            # prove the hash-chained audit trail is intact
+```mermaid
+flowchart LR
+  subgraph Sandbox["AstroMart (OTel-instrumented)"]
+    GW[gateway] --> CO[checkout] --> PAY[payment]
+    CO --> INV[inventory]
+  end
+  Sandbox -- OTLP --> SZ[(SigNoz self-hosted)]
+  SZ -- alert webhook --> AK[Agent K]
+  AK -- MCP / API v5 --> SZ
+  AK -- "own traces: gen_ai spans, cost, audit" --> SZ
+  AK -- RCA + approval --> SL[Slack]
 ```
 
-Agent K reports: `http://localhost:9000/reports` · SigNoz: `http://localhost:8080` — open **Watch the Watcher** to see the agent observing itself.
+## How SigNoz does the work
 
----
+The agent never talks to a database directly. It reads everything through the SigNoz MCP server — 14 read-only tools (list services, aggregate traces, search logs, run Query Builder v5, get alert history, and so on). My investigation "playbook" is basically a QB v5 cheat-sheet the model follows:
 
-_Agent K — an AI SRE that brings receipts: a verdict, a business blast radius, a validated fix, an independent groundedness check, and a tamper-evident trail — all grounded in, and observable through, SigNoz._
+- **Error rate:** `countIf(has_error=true) / count() * 100` on `service.name = 'checkout'`.
+- **Deploy correlation:** group `p99(duration_nano)` and `countIf(has_error=true)` by `service.version` to catch a bad rollout.
+- **Blast radius:** `sumIf(order.total, has_error = true)` for failed-order dollars and `count_distinct(user.id)` for affected users.
+- **Secret leak:** a regex over log bodies — `body REGEXP 'AKIA[0-9A-Z]{16}'`.
+
+One concrete gotcha worth saving you an hour: in QB v5, `hasAll(...)` works on **log-body JSON, not span attributes**. To isolate my feature-flag conflict on spans I had to use `feature_flags CONTAINS 'new-checkout' AND feature_flags CONTAINS 'express-pay'`, not `hasAll`. The other one: **anchor every query to the alert's fire window** (about 15 minutes before it fired). My first version happily pulled in a *previous, already-resolved* incident and confidently blamed the wrong deploy.
+
+> 🖼️ **[IMAGE 2 — the RCA report]** Screenshot `localhost:9000/reports/<id>`: the green audit badge, the root cause naming checkout v1.4.2, and the Blast Radius section with dollars/users/tenants.
+
+## The bug that taught me what "grounded" means
+
+Here's the part I couldn't have learned from docs. I added a second, independent model — an **auditor** — whose only job is to read the finished RCA and check that every factual claim is backed by the evidence the agent actually collected. Sounds simple. It kept failing my *correct* reports.
+
+The first failure surprised me. My bad-deploy RCA correctly said: *"the checkout v1.4.2 deployment introduced a failure path."* The auditor flagged that exact sentence as **unsupported**. And technically it was right — that sentence appears nowhere in the raw tool output. But that sentence is the *entire point of an RCA*: it's an **inference** from correlated evidence (a deploy marker plus an error spike right after it), not a fact you can grep for. I had to teach the auditor the difference between "this specific number isn't in the evidence" (flag it) and "this is a diagnostic conclusion the cited evidence reasonably supports" (that's the job).
+
+The second failure was subtler and more embarrassing. Even after that fix, the auditor kept flagging the **blast-radius numbers** — the dollar figures and user counts. I was sure those came from real `sumIf`/`count_distinct` queries. They did. The problem: I was truncating the evidence I handed the auditor to the first 45 KB — and blast-radius queries run **last** in the playbook, so their results were beyond the cutoff. The auditor was being asked to verify numbers it literally couldn't see. Switching to a head-and-tail truncation (keep the beginning and the whole end) fixed it.
+
+Both fixes are the kind of thing you only find by running the real thing and reading why it disagreed with you. After them, a correct RCA reliably comes back **grounded**, and the verdict is published as a badge on the report, an `agentk.audit.groundedness` metric in SigNoz, and an alert that fires if an ungrounded RCA ever ships.
+
+> 🖼️ **[IMAGE 3 — Watch the Watcher dashboard]** Screenshot the SigNoz dashboard showing cost per investigation, tokens, MCP tool calls, and the groundedness panel — the agent observing itself.
+
+## A smaller gotcha: GPT-5 and temperature
+
+I ran the agent on `gpt-5-mini`. My whole loop sent `temperature=0` for determinism. Every call 400'd with:
+
+```
+Unsupported value: 'temperature' does not support 0 with this model.
+Only the default (1) value is supported.
+```
+
+The fix was to make temperature optional and simply **omit** it for gpt-5-family models rather than sending `0`. Small thing, but it silently broke every investigation until I read the error instead of assuming the SDK default was fine.
+
+## Measured, not just demoed
+
+A demo proves an agent *can* be right once. I wanted a number. So I wrote a scored benchmark: it drives the real chaos and a firing alert for each fault class, lets the agent run its live investigation, then scores the **stored** verdict deterministically against ground truth — right service, right fault signature, right guarded action — plus a healthy control that measures how often it pages when nothing is wrong. Because scoring keys on the stored facts and the auditor verdict, **a run can't pass on a hallucinated narrative.**
+
+On the five-class run: 100% detection, localization, and classification, 100% groundedness, and **0% false alarms** on the healthy control. The benchmark also earned its keep by *failing first* — it's how I caught a false-alarm scoring bug where my check substring-matched the report template's literal "Regression onset:" line and flagged a perfectly healthy verdict. Honest benchmarks find your bugs before a judge does.
+
+> 🖼️ **[IMAGE 4 — benchmark results]** Screenshot `docs/benchmark/BENCHMARK.md` (the headline table).
+
+> 🖼️ **[IMAGE 5 — Slack]** Screenshot the Slack thread: the RCA, the remediation proposal, the approval, and the verification follow-up.
+
+## What I'd tell my past self
+
+- **The agent is the easy part.** Grounding and observability are where the real work is. An LLM that writes a confident RCA is worth nothing without a way to check it against evidence.
+- **Constraining the agent makes it more useful, not less.** One tool surface (the MCP `step`), a cost budget, a guaranteed-finish, and an independent auditor — those constraints are exactly what made it safe to trust the output.
+- **The valuable signal is the join.** Neither the client-side error rate nor the server-side rollup is new. Pairing them over the exact incident window is what turns "it got slower" into "checkout v1.4.2 caused a 5xx spike."
+- **Instrument your agent like production.** Emitting `gen_ai` spans and a cost metric back into SigNoz meant I debugged the *agent* with the same tools it uses to debug everything else — including an alert where it ends up investigating itself.
+
+## Try it
+
+Everything is one command each: `make up` (SigNoz via committed Foundry manifests + the stack), `make provision` (alerts, dashboards, and saved views as code), `make demo` (inject a bad deploy and watch the agent investigate), `make benchmark`, and `make verify-ledger`. Code and the full benchmark harness are in the repo.
+
+If you're building agents on top of observability data, my one takeaway is this: budget most of your time for the boring, unglamorous 80% — grounding, auditing, and making the agent observable. That's what turns a clever demo into something you'd actually leave running.
