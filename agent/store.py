@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import sqlite3
 from datetime import datetime, timezone
 from typing import Any
@@ -9,9 +11,22 @@ from uuid import uuid4
 
 from config import settings
 
+# Genesis hash for the ledger chain — the "previous hash" of the very first entry.
+GENESIS_HASH = "0" * 64
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _canonical(payload: dict[str, Any]) -> str:
+    """Deterministic JSON encoding so the hash is stable across processes."""
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+
+
+def ledger_entry_hash(prev_hash: str, payload_canonical: str) -> str:
+    """Compute a ledger entry hash from the previous hash + canonical payload."""
+    return hashlib.sha256((prev_hash + payload_canonical).encode("utf-8")).hexdigest()
 
 
 class Store:
@@ -60,14 +75,30 @@ class Store:
                 verification_md TEXT,
                 FOREIGN KEY (investigation_id) REFERENCES investigations(id)
             );
+            CREATE TABLE IF NOT EXISTS ledger (
+                seq INTEGER PRIMARY KEY AUTOINCREMENT,
+                investigation_id TEXT NOT NULL,
+                ts TEXT NOT NULL,
+                entry_type TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                prev_hash TEXT NOT NULL,
+                entry_hash TEXT NOT NULL
+            );
         """)
-        # Migration: full LLM/tool transcript per investigation (audit trail).
+        # Migration: full LLM/tool transcript + auditor verdict per investigation.
         cols = {
             row["name"]
             for row in conn.execute("PRAGMA table_info(investigations)").fetchall()
         }
         if "transcript_json" not in cols:
             conn.execute("ALTER TABLE investigations ADD COLUMN transcript_json TEXT")
+        # audit_grounded stored as INTEGER (0/1) or NULL when the audit errored.
+        if "audit_grounded" not in cols:
+            conn.execute("ALTER TABLE investigations ADD COLUMN audit_grounded INTEGER")
+        if "audit_score" not in cols:
+            conn.execute("ALTER TABLE investigations ADD COLUMN audit_score REAL")
+        if "audit_json" not in cols:
+            conn.execute("ALTER TABLE investigations ADD COLUMN audit_json TEXT")
         conn.commit()
 
     # ── Investigations ────────────────────────────────────────────
@@ -103,6 +134,9 @@ class Store:
             "tokens_out",
             "trace_id",
             "transcript_json",
+            "audit_grounded",
+            "audit_score",
+            "audit_json",
         }
         fields = {k: v for k, v in kwargs.items() if k in allowed}
         if not fields:
@@ -210,6 +244,83 @@ class Store:
             (investigation_id,),
         ).fetchall()
         return [dict(r) for r in rows]
+
+    # ── Hash-chained audit ledger ─────────────────────────────────
+
+    def append_ledger(
+        self,
+        investigation_id: str,
+        entry_type: str,
+        payload: dict[str, Any],
+    ) -> str:
+        """Append a tamper-evident entry to the hash-chained ledger.
+
+        Each entry's hash covers the previous entry's hash plus this entry's
+        canonical payload, so any later edit to a row breaks the chain from that
+        point on. Single-writer via the shared connection keeps ordering and the
+        prev-hash lookup consistent. Returns the new entry_hash.
+        """
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT entry_hash FROM ledger ORDER BY seq DESC LIMIT 1"
+        ).fetchone()
+        prev_hash = row["entry_hash"] if row else GENESIS_HASH
+        ts = _now_iso()
+        # Bind ts/type/investigation into the hashed payload so they can't be
+        # altered without breaking the chain either.
+        sealed = {
+            "investigation_id": investigation_id,
+            "ts": ts,
+            "entry_type": entry_type,
+            "payload": payload,
+        }
+        canonical = _canonical(sealed)
+        entry_hash = ledger_entry_hash(prev_hash, canonical)
+        conn.execute(
+            """INSERT INTO ledger
+               (investigation_id, ts, entry_type, payload_json, prev_hash, entry_hash)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (investigation_id, ts, entry_type, canonical, prev_hash, entry_hash),
+        )
+        conn.commit()
+        return entry_hash
+
+    def list_ledger(
+        self, investigation_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Return ledger entries in chain order (optionally for one investigation)."""
+        conn = self._get_conn()
+        if investigation_id:
+            rows = conn.execute(
+                "SELECT * FROM ledger WHERE investigation_id = ? ORDER BY seq",
+                (investigation_id,),
+            ).fetchall()
+        else:
+            rows = conn.execute("SELECT * FROM ledger ORDER BY seq").fetchall()
+        return [dict(r) for r in rows]
+
+    def verify_ledger(
+        self, investigation_id: str | None = None
+    ) -> tuple[bool, int, int | None]:
+        """Recompute the hash chain. Returns (ok, entries_checked, bad_seq).
+
+        The chain is global (prev_hash links every row regardless of
+        investigation), so full verification always walks the whole table; an
+        investigation_id filter only narrows which rows are *reported*, not how
+        the chain is recomputed.
+        """
+        rows = self.list_ledger()
+        prev_hash = GENESIS_HASH
+        checked = 0
+        for row in rows:
+            if row["prev_hash"] != prev_hash:
+                return False, checked, row["seq"]
+            expected = ledger_entry_hash(prev_hash, row["payload_json"])
+            if expected != row["entry_hash"]:
+                return False, checked, row["seq"]
+            prev_hash = row["entry_hash"]
+            checked += 1
+        return True, checked, None
 
 
 # Singleton

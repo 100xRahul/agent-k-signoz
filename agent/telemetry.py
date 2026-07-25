@@ -30,6 +30,7 @@ _investigations_counter: Counter | None = None
 _investigations_failed_counter: Counter | None = None
 _investigation_duration: Histogram | None = None
 _cost_counter: Counter | None = None
+_audit_counter: Counter | None = None
 
 
 def get_tracer() -> trace.Tracer:
@@ -41,7 +42,7 @@ def get_tracer() -> trace.Tracer:
 
 def setup_telemetry(app: Any | None = None) -> None:
     """Initialize OTel providers, exporters, and instrument FastAPI."""
-    global _tracer, _investigations_counter, _investigations_failed_counter, _investigation_duration, _cost_counter
+    global _tracer, _investigations_counter, _investigations_failed_counter, _investigation_duration, _cost_counter, _audit_counter
 
     resource = Resource.create(
         {
@@ -86,6 +87,11 @@ def setup_telemetry(app: Any | None = None) -> None:
         "agentk.cost.usd",
         description="Cumulative LLM cost in USD",
         unit="USD",
+    )
+    _audit_counter = meter.create_counter(
+        "agentk.audit.groundedness",
+        description="Auditor verdicts on finished RCAs, by outcome",
+        unit="1",
     )
 
     # ── Logs ──────────────────────────────────────────────────────
@@ -132,6 +138,12 @@ def record_cost(cost_usd: float, model: str = "") -> None:
         _cost_counter.add(cost_usd, {"gen_ai.request.model": model})
 
 
+def record_audit(outcome: str) -> None:
+    """Record an auditor verdict. outcome ∈ {grounded, ungrounded, error, skipped}."""
+    if _audit_counter:
+        _audit_counter.add(1, {"agentk.audit.outcome": outcome})
+
+
 # ── Span helpers ──────────────────────────────────────────────────
 
 
@@ -160,6 +172,8 @@ def set_investigation_result(
     total_cost_usd: float,
     tools_used_count: int = 0,
     model: str = "",
+    audit_outcome: str = "",
+    audit_score: float | None = None,
 ) -> None:
     """Set final result attributes on the investigation span."""
     span.set_attribute("agentk.root_cause", root_cause)
@@ -168,6 +182,27 @@ def set_investigation_result(
     span.set_attribute("agentk.tools_used_count", tools_used_count)
     if model:
         span.set_attribute("gen_ai.request.model", model)
+    if audit_outcome:
+        span.set_attribute("agentk.audit.outcome", audit_outcome)
+        span.set_attribute("agentk.audit.grounded", audit_outcome == "grounded")
+    if audit_score is not None:
+        span.set_attribute("agentk.audit.score", audit_score)
+
+
+@contextmanager
+def audit_call_span(model: str) -> Generator[Span, None, None]:
+    """Create a child span for the independent auditor LLM call."""
+    tracer = get_tracer()
+    with tracer.start_as_current_span(
+        "audit.call",
+        attributes={
+            "gen_ai.system": "openai",
+            "gen_ai.operation.name": "chat",
+            "gen_ai.request.model": model,
+            "agentk.audit": True,
+        },
+    ) as span:
+        yield span
 
 
 @contextmanager

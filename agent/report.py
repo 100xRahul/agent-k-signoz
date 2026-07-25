@@ -135,6 +135,49 @@ def rewrite_signoz_links(report_md: str) -> str:
     return report_md
 
 
+# ── Auditor badge ────────────────────────────────────────────────
+
+
+def audit_badge(audit: Any) -> str:
+    """Build a one-line groundedness badge from an AuditResult for the report header."""
+    outcome = getattr(audit, "outcome", "skipped")
+    if outcome == "skipped":
+        return ""
+    if outcome == "grounded":
+        score = getattr(audit, "score", None)
+        pct = f" ({score * 100:.0f}% of claims backed)" if score is not None else ""
+        return f"> ✅ **Independent audit: grounded**{pct} — every factual claim is backed by collected evidence.\n\n"
+    if outcome == "ungrounded":
+        claims = getattr(audit, "unsupported_claims", []) or []
+        n = len(claims)
+        head = (
+            f"> ⚠️ **Independent audit: UNGROUNDED** — {n} unsupported "
+            f"claim{'s' if n != 1 else ''} flagged by a second, independent model:\n"
+        )
+        bullets = "".join(f">   - {c}\n" for c in claims[:5])
+        notes = getattr(audit, "notes", "")
+        tail = f">\n> _{notes}_\n\n" if notes else "\n"
+        return head + bullets + tail
+    # error
+    err = getattr(audit, "error", "")
+    return (
+        f"> ⚠️ **Independent audit: could not run** — this RCA was published "
+        f"WITHOUT a groundedness check ({err[:160]}).\n\n"
+    )
+
+
+def prepend_audit_badge(report_md: str, audit: Any) -> str:
+    """Insert the audit badge just under the report's title line."""
+    badge = audit_badge(audit)
+    if not badge:
+        return report_md
+    lines = report_md.split("\n", 1)
+    if lines and lines[0].startswith("#"):
+        rest = lines[1] if len(lines) > 1 else ""
+        return f"{lines[0]}\n\n{badge}{rest}"
+    return badge + report_md
+
+
 # ── Report rendering ─────────────────────────────────────────────
 
 
@@ -158,6 +201,8 @@ def format_investigation_for_list(inv: dict[str, Any]) -> dict[str, Any]:
         "tokens_in": inv.get("tokens_in", 0),
         "tokens_out": inv.get("tokens_out", 0),
         "trace_id": inv.get("trace_id", ""),
+        "audit_grounded": inv.get("audit_grounded"),
+        "audit_score": inv.get("audit_score"),
     }
 
 

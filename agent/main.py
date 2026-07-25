@@ -192,6 +192,18 @@ async def approve_action(action_id: str, sig: str = Query(...)) -> HTMLResponse:
         action_id, status="executed", executed_at=datetime.now(timezone.utc).isoformat()
     )
 
+    # Seal the execution into the hash-chained ledger.
+    store.append_ledger(
+        action["investigation_id"],
+        "remediation.executed",
+        {
+            "action_id": action_id,
+            "kind": action["kind"],
+            "service": params.get("service", ""),
+            "approved_via": "hmac-link",
+        },
+    )
+
     # Start verification in background (keep a ref so the task isn't GC'd)
     task = asyncio.create_task(_verify_and_update(action_id, action, params, result))
     _background_tasks.add(task)
@@ -239,6 +251,11 @@ def _serialize_investigation(inv: dict) -> dict:
     base = format_investigation_for_list(inv)
     base["report_md"] = inv.get("report_md")
     base["finished_at"] = inv.get("finished_at")
+    # Auditor verdict (for the benchmark harness + UI).
+    audit_json = inv.get("audit_json")
+    base["audit"] = json.loads(audit_json) if audit_json else None
+    # Proposed/executed remediation actions (benchmark scores against these).
+    base["actions"] = store.get_actions_for_investigation(inv.get("id", ""))
     return base
 
 
@@ -311,6 +328,42 @@ async def get_transcript(investigation_id: str) -> JSONResponse:
         raise HTTPException(status_code=404, detail="Investigation not found")
     transcript = json.loads(investigation.get("transcript_json") or "[]")
     return JSONResponse(content={"id": investigation_id, "transcript": transcript})
+
+
+@app.get("/reports/{investigation_id}/ledger")
+async def get_ledger(investigation_id: str) -> JSONResponse:
+    """Hash-chained ledger entries for an investigation + chain verification.
+
+    The chain is global, so `chain_ok` reflects the integrity of the whole
+    ledger up to now, not just this investigation's rows.
+    """
+    investigation = store.get_investigation(investigation_id)
+    if investigation is None:
+        raise HTTPException(status_code=404, detail="Investigation not found")
+    entries = store.list_ledger(investigation_id)
+    ok, checked, bad_seq = store.verify_ledger()
+    return JSONResponse(
+        content={
+            "id": investigation_id,
+            "entries": entries,
+            "chain_ok": ok,
+            "entries_checked": checked,
+            "tampered_seq": bad_seq,
+        }
+    )
+
+
+@app.get("/api/ledger/verify")
+async def api_verify_ledger() -> JSONResponse:
+    """Recompute the whole hash-chained ledger and report integrity."""
+    ok, checked, bad_seq = store.verify_ledger()
+    return JSONResponse(
+        content={
+            "chain_ok": ok,
+            "entries_checked": checked,
+            "tampered_seq": bad_seq,
+        }
+    )
 
 
 @app.get("/healthz")

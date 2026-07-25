@@ -17,6 +17,17 @@ class Settings(BaseSettings):
     llm_input_price_per_mtok: float = 0.0
     llm_output_price_per_mtok: float = 0.0
 
+    # ── Independent auditor (groundedness gate) ───────────────────
+    # A second LLM pass, with its own fresh context, screens each finished RCA
+    # for groundedness before it is published. Enabled by default.
+    auditor_enabled: bool = True
+    # Empty → reuse `openai_model` on the same endpoint. Pointing this at a
+    # DIFFERENT model (optionally via `auditor_base_url`/`auditor_api_key`) is
+    # what makes the check genuinely independent of the writer.
+    auditor_model: str = ""
+    auditor_base_url: str = ""
+    auditor_api_key: str = ""
+
     # ── SigNoz ────────────────────────────────────────────────────
     signoz_url: str = "http://localhost:8080"
     signoz_internal_url: str = "http://signoz:8080"
@@ -48,6 +59,20 @@ class Settings(BaseSettings):
             input_tokens * self.llm_input_price_per_mtok / 1_000_000
             + output_tokens * self.llm_output_price_per_mtok / 1_000_000
         )
+
+    # Effective auditor endpoint — falls back to the main LLM config when the
+    # auditor-specific override is unset (documented default, not silent).
+    @property
+    def effective_auditor_model(self) -> str:
+        return self.auditor_model or self.openai_model
+
+    @property
+    def effective_auditor_base_url(self) -> str:
+        return self.auditor_base_url or self.openai_base_url
+
+    @property
+    def effective_auditor_api_key(self) -> str:
+        return self.auditor_api_key or self.openai_api_key
 
     model_config = {"env_prefix": "", "case_sensitive": False}
 

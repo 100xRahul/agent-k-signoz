@@ -143,6 +143,65 @@ def test_store_latest_investigation_for_alert(tmp_path):
     assert s.latest_investigation_for_alert("no-such-alert") is None
 
 
+def test_ledger_chain_intact_and_tamper_detected(tmp_path):
+    """Ledger seals entries; any later edit to a payload breaks the chain."""
+    from store import Store
+
+    s = Store(db_path=str(tmp_path / "ledger.db"))
+    inv = s.create_investigation(trigger_json="{}")
+    s.append_ledger(inv, "investigation.start", {"alertname": "x"})
+    s.append_ledger(inv, "tool.call", {"tool": "signoz_search_traces", "result_sha256": "abc"})
+    s.append_ledger(inv, "investigation.finish", {"status": "done"})
+
+    ok, checked, bad = s.verify_ledger()
+    assert ok is True
+    assert checked == 3
+    assert bad is None
+
+    # Tamper with the middle entry's payload directly in SQLite.
+    conn = s._get_conn()
+    conn.execute(
+        "UPDATE ledger SET payload_json = ? WHERE entry_type = 'tool.call'",
+        ('{"tool":"evil"}',),
+    )
+    conn.commit()
+
+    ok, checked, bad = s.verify_ledger()
+    assert ok is False
+    assert bad is not None
+
+
+def test_ledger_hash_is_deterministic():
+    """Same prev hash + payload → same entry hash (stable across processes)."""
+    from store import ledger_entry_hash
+
+    h1 = ledger_entry_hash("0" * 64, '{"a":1}')
+    h2 = ledger_entry_hash("0" * 64, '{"a":1}')
+    assert h1 == h2
+    assert h1 != ledger_entry_hash("0" * 64, '{"a":2}')
+
+
+def test_audit_badge_variants():
+    """Report badge reflects grounded / ungrounded / error auditor outcomes."""
+    from auditor import AuditResult
+    from report import audit_badge, prepend_audit_badge
+
+    assert "grounded" in audit_badge(AuditResult(outcome="grounded", score=1.0)).lower()
+    ung = audit_badge(
+        AuditResult(outcome="ungrounded", unsupported_claims=["p95 318ms"], notes="n")
+    )
+    assert "ungrounded" in ung.lower()
+    assert "p95 318ms" in ung
+    assert "could not run" in audit_badge(AuditResult(outcome="error", error="boom")).lower()
+    assert audit_badge(AuditResult(outcome="skipped")) == ""
+
+    body = prepend_audit_badge(
+        "# Title\n\nbody text", AuditResult(outcome="grounded", score=0.9)
+    )
+    assert body.startswith("# Title")
+    assert "grounded" in body.lower()
+
+
 def test_webhook_parsing():
     """Test parsing of SigNoz alert webhook payloads using fixture."""
     fixture_path = Path(__file__).parent / "fixtures" / "webhook_sample.json"

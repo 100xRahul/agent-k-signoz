@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import time
@@ -11,16 +12,18 @@ from typing import Any
 from openai import AsyncOpenAI
 from opentelemetry import trace
 
+from auditor import AuditResult, audit_rca
 from config import settings
 from models import InvestigationTrigger
 from playbook import PLAYBOOK, render_trigger
-from report import rewrite_signoz_links
+from report import prepend_audit_badge, rewrite_signoz_links
 from slack import post_rca, post_remediation_proposal
 from store import store
 from telemetry import (
     get_current_trace_id,
     investigation_span,
     llm_call_span,
+    record_audit,
     record_cost,
     record_investigation_duration,
     record_investigation_failed,
@@ -131,6 +134,18 @@ async def run_investigation(
 
         # Update investigation with trace_id
         store.update_investigation(investigation_id, trace_id=trace_id)
+
+        # Seal the opening of the investigation into the hash-chained ledger.
+        store.append_ledger(
+            investigation_id,
+            "investigation.start",
+            {
+                "trigger_type": trigger.type.value,
+                "alertname": alertname,
+                "scenario": scenario,
+                "trace_id": trace_id,
+            },
+        )
 
         # Async client — a blocking client here would freeze every other
         # endpoint (webhooks, approvals) for the duration of each LLM call.
@@ -321,20 +336,9 @@ async def run_investigation(
                         report_md = fn_args.get("report_markdown", "")
                         root_cause = fn_args.get("root_cause_oneliner", "")
                         confidence = fn_args.get("confidence", "medium")
-
-                        # Add cost footer to report
-                        duration = time.time() - start_time
-                        cost_footer = (
-                            f"\n\n## Cost of This Investigation\n"
-                            f"- {total_tokens_in + total_tokens_out} tokens "
-                            f"({total_tokens_in} in + {total_tokens_out} out) · "
-                            f"${total_cost:.4f} · {duration:.1f}s\n"
-                            f"- [View my trace](signoz://trace/{trace_id})\n"
-                        )
-                        report_md += cost_footer
-
-                        # Rewrite signoz:// links
-                        report_md = rewrite_signoz_links(report_md)
+                        # Footer + link rewrite + audit badge are applied in the
+                        # post-loop section so the cost footer can include the
+                        # independent auditor's own token spend.
 
                         messages.append(
                             {
@@ -370,6 +374,23 @@ async def run_investigation(
                             )
                             set_tool_result(t_span, result_bytes, is_error)
                         tools_used_count += 1
+
+                        # Seal the tool call into the ledger — store a hash of the
+                        # result (not the full body) so entries stay small but any
+                        # later edit to what the agent "saw" is still detectable.
+                        store.append_ledger(
+                            investigation_id,
+                            "tool.call",
+                            {
+                                "tool": fn_name,
+                                "args": fn_args,
+                                "result_bytes": result_bytes,
+                                "result_sha256": hashlib.sha256(
+                                    result.encode("utf-8")
+                                ).hexdigest(),
+                                "error": is_error,
+                            },
+                        )
 
                         # Truncate result for context window
                         if len(result) > 15000:
@@ -419,12 +440,66 @@ async def run_investigation(
             logger.warning("MCP session close failed", exc_info=True)
 
         # ── Persist results ───────────────────────────────────────
-        duration = time.time() - start_time
         status = "done" if finished else "failed"
 
         if not report_md:
             report_md = "# Investigation completed without generating a report."
             root_cause = root_cause or "No root cause determined"
+
+        # ── Independent auditor gate ──────────────────────────────
+        # A second, independent model screens the finished RCA for groundedness
+        # against the evidence the agent actually collected, BEFORE we publish.
+        # Advisory, not blocking: an ungrounded RCA is still delivered (an SRE
+        # needs the finding) but is badged and counted. Fail loud on error.
+        audit = AuditResult(outcome="skipped")
+        if status == "done" and settings.auditor_enabled:
+            evidence = "\n\n---\n\n".join(
+                m.get("content", "")
+                for m in messages
+                if m.get("role") == "tool" and m.get("content")
+            )
+            try:
+                audit = await audit_rca(report_md, evidence)
+            except Exception:
+                logger.exception("Auditor pass raised unexpectedly")
+                audit = AuditResult(outcome="error", error="auditor raised")
+            total_cost += audit.cost_usd
+            total_tokens_in += audit.tokens_in
+            total_tokens_out += audit.tokens_out
+            if audit.cost_usd:
+                record_cost(audit.cost_usd, settings.effective_auditor_model)
+            record_audit(audit.outcome)
+            store.append_ledger(
+                investigation_id,
+                "audit.verdict",
+                {
+                    "outcome": audit.outcome,
+                    "grounded": audit.grounded,
+                    "score": audit.score,
+                    "unsupported_claims": audit.unsupported_claims,
+                    "auditor_model": settings.effective_auditor_model,
+                },
+            )
+
+        # ── Finalize report: rewrite links, append cost footer, prepend badge ──
+        duration = time.time() - start_time
+        report_md = rewrite_signoz_links(report_md)
+        report_md += (
+            f"\n\n## Cost of This Investigation\n"
+            f"- {total_tokens_in + total_tokens_out} tokens "
+            f"({total_tokens_in} in + {total_tokens_out} out) · "
+            f"${total_cost:.4f} · {duration:.1f}s "
+            f"(incl. independent audit)\n"
+            f"- [View my trace]({rewrite_signoz_links('signoz://trace/' + trace_id)})\n"
+        )
+        report_md = prepend_audit_badge(report_md, audit)
+
+        # audit_grounded: 1 grounded / 0 ungrounded / NULL when skipped or errored.
+        audit_grounded = (
+            1 if audit.outcome == "grounded"
+            else 0 if audit.outcome == "ungrounded"
+            else None
+        )
 
         store.update_investigation(
             investigation_id,
@@ -437,6 +512,22 @@ async def run_investigation(
             tokens_out=total_tokens_out,
             # Full audit trail: every prompt, tool call, and tool result.
             transcript_json=json.dumps(messages),
+            audit_grounded=audit_grounded,
+            audit_score=audit.score,
+            audit_json=audit.to_json(),
+        )
+
+        # Seal the verdict into the ledger.
+        store.append_ledger(
+            investigation_id,
+            "investigation.finish",
+            {
+                "status": status,
+                "root_cause": root_cause,
+                "confidence": confidence or "medium",
+                "cost_usd": round(total_cost, 6),
+                "audit_outcome": audit.outcome,
+            },
         )
 
         # Set span attributes
@@ -447,6 +538,8 @@ async def run_investigation(
             total_cost_usd=total_cost,
             tools_used_count=tools_used_count,
             model=settings.openai_model,
+            audit_outcome=audit.outcome,
+            audit_score=audit.score,
         )
         record_investigation_duration(duration, alertname)
         if status == "failed":
@@ -493,6 +586,13 @@ async def _handle_propose_remediation(
         params_json=json.dumps(params),
     )
 
+    # Seal the proposal into the ledger.
+    store.append_ledger(
+        investigation_id,
+        "remediation.proposed",
+        {"action_id": action_id, "kind": kind, "service": service, "reason": reason},
+    )
+
     # Post to Slack with approval link
     try:
         await post_remediation_proposal(
@@ -513,6 +613,16 @@ async def _handle_propose_remediation(
         store.update_action(action_id, status="approved")
         try:
             result = await execute_action(kind, params)
+            store.append_ledger(
+                investigation_id,
+                "remediation.executed",
+                {
+                    "action_id": action_id,
+                    "kind": kind,
+                    "service": service,
+                    "approved_via": "auto-approve",
+                },
+            )
             return f"Remediation auto-approved and executed: {result}"
         except Exception as exc:
             return f"Remediation auto-approved but execution failed: {exc}"
