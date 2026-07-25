@@ -69,6 +69,13 @@
                 "y": 9,
                 "w": 6,
                 "h": 3
+            },
+            {
+                "i": "audit-groundedness",
+                "x": 0,
+                "y": 12,
+                "w": 6,
+                "h": 3
             }
         ],
         "widgets": [
@@ -418,6 +425,34 @@
                             "limit": 20,
                             "expression": "A",
                             "disabled": false
+                        }]
+                    }
+                }
+            },
+            {
+                "id": "audit-groundedness",
+                "title": "✅ RCA Groundedness (independent auditor)",
+                "description": "Auditor verdict on each finished RCA, grouped by agentk.audit.outcome — grounded vs ungrounded vs error. The writer is checked, not trusted.",
+                "panelTypes": "graph",
+                "query": {
+                    "queryType": "builder",
+                    "builder": {
+                        "queryData": [{
+                            "dataSource": "traces",
+                            "queryName": "A",
+                            "aggregateOperator": "count",
+                            "aggregateAttribute": {"key": "", "type": "tag", "dataType": "string"},
+                            "filters": {
+                                "items": [
+                                    {"key": {"key": "service.name", "type": "resource", "dataType": "string"}, "op": "=", "value": "agent-k"},
+                                    {"key": {"key": "span.name", "type": "tag", "dataType": "string"}, "op": "=", "value": "investigation"}
+                                ],
+                                "op": "AND"
+                            },
+                            "groupBy": [{"key": "agentk.audit.outcome", "type": "tag", "dataType": "string"}],
+                            "expression": "A",
+                            "disabled": false,
+                            "limit": 100
                         }]
                     }
                 }

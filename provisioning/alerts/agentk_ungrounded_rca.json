@@ -1,0 +1,46 @@
+{
+    "alert": "agentk-ungrounded-rca",
+    "alertType": "METRIC_BASED_ALERT",
+    "ruleType": "threshold_rule",
+    "version": "v5",
+    "evalWindow": "5m",
+    "frequency": "1m",
+    "condition": {
+        "compositeQuery": {
+            "queryType": "builder",
+            "panelType": "graph",
+            "queries": [
+                {
+                    "type": "builder_query",
+                    "spec": {
+                        "name": "A",
+                        "signal": "metrics",
+                        "stepInterval": "60s",
+                        "filter": {
+                            "expression": "agentk.audit.outcome = 'ungrounded'"
+                        },
+                        "aggregations": [
+                            {
+                                "metricName": "agentk.audit.groundedness",
+                                "timeAggregation": "rate",
+                                "spaceAggregation": "sum"
+                            }
+                        ]
+                    }
+                }
+            ]
+        },
+        "op": "above",
+        "target": 0,
+        "matchType": "at_least_once",
+        "selectedQueryName": "A"
+    },
+    "labels": {
+        "severity": "warning",
+        "service": "agent-k"
+    },
+    "annotations": {
+        "summary": "Agent K published an ungrounded RCA",
+        "description": "The independent auditor flagged a finished RCA as ungrounded — it contained claims not backed by the collected evidence. Review the report and its unsupported_claims. The writer is checked, not trusted."
+    }
+}
