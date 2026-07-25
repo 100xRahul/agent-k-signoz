@@ -1,0 +1,20 @@
+{
+    "name": "AstroMart — Failing checkouts",
+    "sourcePage": "traces",
+    "tags": ["agent-k", "astromart"],
+    "compositeQuery": {
+        "queryType": "builder",
+        "panelType": "list",
+        "queries": [{
+            "type": "builder_query",
+            "spec": {
+                "name": "A",
+                "signal": "traces",
+                "filter": {"expression": "service.name = 'checkout' AND has_error = true"},
+                "aggregations": [{"expression": "count()"}],
+                "limit": 100,
+                "order": [{"key": {"name": "timestamp"}, "direction": "desc"}]
+            }
+        }]
+    }
+}

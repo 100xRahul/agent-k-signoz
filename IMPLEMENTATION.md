@@ -2,7 +2,7 @@
 
 > **Purpose:** Quick technical reference for the entire codebase. Read this instead of re-reading all source files. Kept up-to-date as changes are made.
 >
-> **Last updated:** 2026-07-19 (SigNoz self-host migrated to **Foundry** — SigNoz removed their compose manifests from the repo; we forge manifests from `deploy/signoz/casting.yaml` and commit `pours/`)
+> **Last updated:** 2026-07-20 (live-test pass: 4 dashboards, 7 alerts, 6 views, `make test-live`, `make provision-fresh`)
 
 ---
 
@@ -30,7 +30,7 @@ signoz-hacakethon/
 │   │                            #   Build context = repo root (also copies provisioning/)
 │   ├── pyproject.toml           # Dependencies
 │   ├── config.py                # Settings (pydantic-settings, env vars)
-│   ├── main.py                  # FastAPI app: webhooks, approvals, reports
+│   ├── main.py                  # FastAPI: webhooks, approvals, reports, GET /api/investigations
 │   ├── models.py                # Pydantic models: AlertmanagerWebhook, triggers
 │   ├── loop.py                  # Agent reasoning loop (tool-use over OpenAI API)
 │   ├── playbook.py              # System prompt (SRE runbook, 8 investigation steps)
@@ -39,7 +39,7 @@ signoz-hacakethon/
 │   │                            #   MCP down = investigation fails loudly
 │   ├── remediation.py           # Guarded actions: rollback, disable_flag, restart
 │   ├── report.py                # signoz:// link rewriting, HTML rendering
-│   ├── slack.py                 # Block Kit messages, HMAC approval links
+│   ├── slack.py                 # Block Kit messages, HMAC approval links; console RCA when no Slack
 │   ├── store.py                 # SQLite (WAL): investigations + actions tables
 │   ├── telemetry.py             # OTel setup: traces, metrics, logs, gen_ai semconv
 │   ├── templates/
@@ -83,21 +83,28 @@ signoz-hacakethon/
 │       ├── Dockerfile           # Slim python image — chaos is pure Redis + OTLP markers
 │       └── pyproject.toml
 │
-├── provisioning/                # Dashboards + alerts as code
+├── provisioning/                # Dashboards + alerts + views as code
 │   ├── __init__.py
-│   ├── provision.py             # Idempotent SigNoz REST API provisioner
+│   ├── provision.py             # Idempotent SigNoz REST provisioner; `--fresh` delete+recreate
 │   ├── dashboards/
 │   │   ├── astromart_overview.json   # Shop metrics (QB v5 rubric queries)
 │   │   ├── watch_the_watcher.json    # Agent meta-observability
-│   │   └── llm_cost.json            # LLM token/cost tracking
-│   └── alerts/
-│       ├── checkout_error_rate.json  # >10% errors for 1 min
-│       ├── checkout_p99_latency.json # >1.5s p99 for 1 min
-│       ├── payment_timeouts.json     # >5 timeout errors/min
-│       ├── secret_leak.json          # AKIA regex in prod logs
-│       └── agentk_budget.json        # Agent cost >$2/hour
+│   │   ├── llm_cost.json            # LLM token/cost tracking
+│   │   └── qb_v5_rubric.json        # QB v5 rubric showcase (11 panels)
+│   ├── alerts/                  # 7 alert rules (incl. flag-combo, agentk-investigation-failed)
+│   └── views/                   # 6 saved Explorer views (panelType: list required)
 │
-├── reports/                     # Generated RCA outputs (.gitkeep)
+├── scripts/
+│   ├── fire_webhook.py          # POST test Alertmanager payload by scenario
+│   ├── test_live.py             # Live E2E harness (`make test-live`)
+│   ├── verify_checkpoints.py
+│   ├── verify_rubric.py
+│   └── incident_budget.py
+│
+├── docs/
+│   ├── TEST_LOG.md              # Live test results with timestamps
+│   ├── demo-script.md
+│   └── architecture.md
 └── deploy/
     └── signoz/                  # SigNoz self-host via Foundry
         ├── casting.yaml         # Foundry install spec (+ alias patches)
@@ -273,7 +280,7 @@ FastAPIInstrumentor.instrument_app(app)
 - `order.total` (float) — for `sumIf` blast radius
 - `user.id` — for `count_distinct` impact
 - `tenant.name` — for per-tenant group-by
-- `feature_flags` (array) — for `hasAll` filter
+- `feature_flags` (array) — use `CONTAINS` on span attrs (`hasAll` is log-body JSON only)
 - `has_error` (bool) — for error rate queries
 
 ---
@@ -281,11 +288,12 @@ FastAPIInstrumentor.instrument_app(app)
 ## Provisioning (provisioning/provision.py)
 
 Idempotent REST-based provisioner against SigNoz API v1:
-1. Creates notification channels: `agent-k-webhook` (→ agent:9000) + `agent-k-slack`
-2. Creates 5 alert rules from `alerts/*.json` (injects channel IDs)
-3. Creates 3 dashboards from `dashboards/*.json`
+1. Creates notification channels: `agent-k-webhook` (→ agent:9000) + optional `agent-k-slack`
+2. Creates **7** alert rules from `alerts/*.json`
+3. Creates **4** dashboards from `dashboards/*.json`
+4. Creates **6** saved Explorer views from `views/*.json` (`compositeQuery.panelType: "list"`)
 
-Runs via `make provision` → `docker compose exec agent python -m provisioning.provision`
+Runs via `make provision` or `make provision-fresh` (delete Agent K resources, then recreate).
 
 ---
 
@@ -321,7 +329,10 @@ canonical hostnames:
 | `make forge-signoz` | Regenerate SigNoz manifests via foundryctl (only to bump SigNoz) |
 | `make down` | Stop everything |
 | `make nuke` | Stop + remove all volumes |
-| `make provision` | Provision dashboards + alerts into SigNoz |
+| `make provision` | Provision dashboards + alerts + views into SigNoz |
+| `make provision-fresh` | Delete and recreate Agent K dashboards/alerts/views |
+| `make test-live` | Live E2E harness (health, manual investigate, chaos scenarios) |
+| `make demo-warm` | resolve → baseline → bad-deploy → fire webhook |
 | `make incident-bad-deploy` | Trigger bad-deploy chaos |
 | `make incident-pool` | Trigger pool-exhaustion chaos |
 | `make incident-flags` | Trigger flag-combo chaos |
@@ -342,9 +353,10 @@ canonical hostnames:
 5. **signoz:// placeholders** — LLM outputs `signoz://trace/<id>`, report.py rewrites to real URLs
 6. **SQLite** — zero-ops, good enough for hackathon scale; also backs the alert cooldown gate
 7. **Chaos via Redis flags** — services check per-request, cheap GET cached 1s
-8. **Alert gating** — resolved alerts never investigated; per-alertname cooldown (`INVESTIGATION_COOLDOWN_MINUTES`) stops re-fire token burn
-9. **Agent image from root context** — carries `provisioning/` so `make provision` runs inside the agent container; `.dockerignore` keeps context slim
-10. **Compose env defaults** — `OPENAI_BASE_URL`/`OPENAI_API_KEY` fall back to sane defaults in docker-compose.yml so an unset var never injects an empty string over the code default
+8. **Alert gating** — resolved alerts never investigated; per-alertname cooldown (`INVESTIGATION_COOLDOWN_MINUTES`); `test-*` webhook fingerprints bypass cooldown for harness
+9. **Slack-free demo** — when `SLACK_WEBHOOK_URL` empty, RCA + approval URL print to stdout
+10. **Agent image from root context** — carries `provisioning/` so `make provision` runs inside the agent container; `.dockerignore` keeps context slim
+11. **Compose env defaults** — `OPENAI_BASE_URL`/`OPENAI_API_KEY` fall back to sane defaults in docker-compose.yml so an unset var never injects an empty string over the code default
 
 ---
 
@@ -352,7 +364,7 @@ canonical hostnames:
 
 1. `make up` → SigNoz UI shows traces from all 4 services
 2. `make incident-bad-deploy` → symptoms visible in Explorer
-3. `make provision` → 5 alerts + 3 dashboards exist; webhook fires
+3. `make provision` → 7 alerts + 4 dashboards + 6 views exist; webhook fires
 4. Agent produces correct RCA using ≥6 SigNoz tools
 5. Full loop: alert → webhook → investigation → Slack RCA → approve → rollback → verify
 6. All 4 scenarios produce correct root causes

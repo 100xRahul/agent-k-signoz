@@ -55,6 +55,20 @@
                 "y": 6,
                 "w": 6,
                 "h": 3
+            },
+            {
+                "i": "investigations-by-alert",
+                "x": 0,
+                "y": 9,
+                "w": 6,
+                "h": 3
+            },
+            {
+                "i": "tool-calls-by-name",
+                "x": 6,
+                "y": 9,
+                "w": 6,
+                "h": 3
             }
         ],
         "widgets": [
@@ -339,7 +353,7 @@
                                 },
                                 "groupBy": [
                                     {
-                                        "key": "model",
+                                        "key": "gen_ai.request.model",
                                         "type": "tag",
                                         "dataType": "string"
                                     }
@@ -348,6 +362,63 @@
                                 "disabled": false
                             }
                         ]
+                    }
+                }
+            },
+            {
+                "id": "investigations-by-alert",
+                "title": "Investigations by Alert",
+                "description": "Which alerts Agent K handles most — grouped by agentk.alertname span attribute.",
+                "panelTypes": "graph",
+                "query": {
+                    "queryType": "builder",
+                    "builder": {
+                        "queryData": [{
+                            "dataSource": "traces",
+                            "queryName": "A",
+                            "aggregateOperator": "count",
+                            "aggregateAttribute": {"key": "", "type": "tag", "dataType": "string"},
+                            "filters": {
+                                "items": [
+                                    {"key": {"key": "service.name", "type": "resource", "dataType": "string"}, "op": "=", "value": "agent-k"},
+                                    {"key": {"key": "span.name", "type": "tag", "dataType": "string"}, "op": "=", "value": "investigation"}
+                                ],
+                                "op": "AND"
+                            },
+                            "groupBy": [{"key": "agentk.alertname", "type": "tag", "dataType": "string"}],
+                            "expression": "A",
+                            "disabled": false,
+                            "limit": 100
+                        }]
+                    }
+                }
+            },
+            {
+                "id": "tool-calls-by-name",
+                "title": "MCP Tool Calls by Name",
+                "description": "SigNoz MCP tool usage per investigation — tool.name on tool.* spans.",
+                "panelTypes": "graph",
+                "query": {
+                    "queryType": "builder",
+                    "builder": {
+                        "queryData": [{
+                            "dataSource": "traces",
+                            "queryName": "A",
+                            "aggregateOperator": "count",
+                            "aggregateAttribute": {"key": "", "type": "tag", "dataType": "string"},
+                            "filters": {
+                                "items": [
+                                    {"key": {"key": "service.name", "type": "resource", "dataType": "string"}, "op": "=", "value": "agent-k"},
+                                    {"key": {"key": "span.name", "type": "tag", "dataType": "string"}, "op": "like", "value": "tool.%"}
+                                ],
+                                "op": "AND"
+                            },
+                            "groupBy": [{"key": "tool.name", "type": "tag", "dataType": "string"}],
+                            "orderBy": [{"columnName": "value", "order": "desc"}],
+                            "limit": 20,
+                            "expression": "A",
+                            "disabled": false
+                        }]
                     }
                 }
             }

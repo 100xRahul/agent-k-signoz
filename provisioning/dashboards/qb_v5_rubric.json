@@ -1,0 +1,295 @@
+{
+    "data": {
+        "title": "QB v5 Rubric Showcase",
+        "description": "Start here: panels map 1:1 to SigNoz judge rubric (#11674–78) — hasAll, NOT EXISTS, regex, sumIf, count_distinct, Having, Order By + Limit, rollout comparison, deploy markers. Run `make incident-*` then open this board.",
+        "tags": ["agent-k", "qb-v5", "rubric"],
+        "layout": [
+            {"i": "flag-combo-isolation", "x": 0, "y": 0, "w": 6, "h": 3},
+            {"i": "secret-scan", "x": 6, "y": 0, "w": 6, "h": 3},
+            {"i": "missing-telemetry", "x": 0, "y": 3, "w": 6, "h": 3},
+            {"i": "json-log-drill", "x": 6, "y": 3, "w": 6, "h": 3},
+            {"i": "blast-radius-value", "x": 0, "y": 6, "w": 4, "h": 3},
+            {"i": "blast-radius-users", "x": 4, "y": 6, "w": 4, "h": 3},
+            {"i": "rollout-compare", "x": 8, "y": 6, "w": 4, "h": 3},
+            {"i": "top-n-routes", "x": 0, "y": 9, "w": 6, "h": 3},
+            {"i": "per-tenant-having", "x": 6, "y": 9, "w": 6, "h": 3},
+            {"i": "deploy-markers", "x": 0, "y": 12, "w": 6, "h": 3},
+            {"i": "version-error-split", "x": 6, "y": 12, "w": 6, "h": 3}
+        ],
+        "widgets": [
+            {
+                "id": "flag-combo-isolation",
+                "title": "hasAll(feature_flags) — Flag Combo Errors",
+                "description": "Rubric: both feature flags on failing checkout spans (hasAll is log-body only; use CONTAINS on span attrs). Watch after `make incident-flags`.",
+                "panelTypes": "graph",
+                "query": {
+                    "queryType": "builder",
+                    "builder": {
+                        "queryData": [{
+                            "dataSource": "traces",
+                            "queryName": "A",
+                            "aggregateOperator": "count",
+                            "aggregateAttribute": {"key": "", "type": "tag", "dataType": "string"},
+                            "filters": {
+                                "expression": "service.name = 'checkout' AND has_error = true AND feature_flags CONTAINS 'new-checkout' AND feature_flags CONTAINS 'express-pay'"
+                            },
+                            "expression": "A",
+                            "disabled": false,
+                            "limit": 100
+                        }]
+                    }
+                }
+            },
+            {
+                "id": "secret-scan",
+                "title": "Regex Secret Scan (AKIA + RSA key)",
+                "description": "Rubric: regex + boolean OR in logs. Watch after `make incident-leak`.",
+                "panelTypes": "graph",
+                "query": {
+                    "queryType": "builder",
+                    "builder": {
+                        "queryData": [{
+                            "dataSource": "logs",
+                            "queryName": "A",
+                            "aggregateOperator": "count",
+                            "aggregateAttribute": {"key": "", "type": "tag", "dataType": "string"},
+                            "filters": {
+                                "expression": "(body REGEXP 'AKIA[0-9A-Z]{16}' OR body CONTAINS 'BEGIN RSA PRIVATE KEY') AND deployment.environment = 'production'"
+                            },
+                            "expression": "A",
+                            "disabled": false,
+                            "limit": 100
+                        }]
+                    }
+                }
+            },
+            {
+                "id": "missing-telemetry",
+                "title": "NOT EXISTS — Missing user.id",
+                "description": "Rubric: NOT EXISTS filter. Checkout spans missing user.id attribute (instrumentation gap detector).",
+                "panelTypes": "value",
+                "query": {
+                    "queryType": "builder",
+                    "builder": {
+                        "queryData": [{
+                            "dataSource": "traces",
+                            "queryName": "A",
+                            "aggregateOperator": "count",
+                            "aggregateAttribute": {"key": "", "type": "tag", "dataType": "string"},
+                            "filters": {
+                                "expression": "service.name = 'checkout' AND user.id NOT EXISTS"
+                            },
+                            "expression": "A",
+                            "disabled": false,
+                            "limit": 100
+                        }]
+                    }
+                }
+            },
+            {
+                "id": "json-log-drill",
+                "title": "JSON Body — retry_count in Logs",
+                "description": "Rubric: JSON body path predicate. Structured checkout logs with retry_count field.",
+                "panelTypes": "graph",
+                "query": {
+                    "queryType": "builder",
+                    "builder": {
+                        "queryData": [{
+                            "dataSource": "logs",
+                            "queryName": "A",
+                            "aggregateOperator": "count",
+                            "aggregateAttribute": {"key": "", "type": "tag", "dataType": "string"},
+                            "filters": {
+                                "expression": "service.name = 'checkout' AND body CONTAINS 'retry_count'"
+                            },
+                            "expression": "A",
+                            "disabled": false,
+                            "limit": 100
+                        }]
+                    }
+                }
+            },
+            {
+                "id": "blast-radius-value",
+                "title": "sumIf(order.total, has_error=true)",
+                "description": "Rubric: conditional aggregation — dollar value of failed orders.",
+                "panelTypes": "value",
+                "query": {
+                    "queryType": "builder",
+                    "builder": {
+                        "queryData": [{
+                            "dataSource": "traces",
+                            "queryName": "A",
+                            "aggregateOperator": "sum",
+                            "aggregateAttribute": {"key": "order.total", "type": "tag", "dataType": "float64"},
+                            "filters": {
+                                "expression": "service.name = 'checkout' AND has_error = true"
+                            },
+                            "expression": "A",
+                            "disabled": false,
+                            "limit": 100
+                        }]
+                    }
+                }
+            },
+            {
+                "id": "blast-radius-users",
+                "title": "count_distinct(user.id) — Impacted Users",
+                "description": "Rubric: count_distinct on failed checkout spans.",
+                "panelTypes": "value",
+                "query": {
+                    "queryType": "builder",
+                    "builder": {
+                        "queryData": [{
+                            "dataSource": "traces",
+                            "queryName": "A",
+                            "aggregateOperator": "count_distinct",
+                            "aggregateAttribute": {"key": "user.id", "type": "tag", "dataType": "string"},
+                            "filters": {
+                                "expression": "service.name = 'checkout' AND has_error = true"
+                            },
+                            "expression": "A",
+                            "disabled": false,
+                            "limit": 100
+                        }]
+                    }
+                }
+            },
+            {
+                "id": "rollout-compare",
+                "title": "Rollout Compare — Errors by Version",
+                "description": "Rubric: group by attribute.service.version. Run `make incident-bad-deploy` to see v1.4.2 spike.",
+                "panelTypes": "graph",
+                "query": {
+                    "queryType": "builder",
+                    "builder": {
+                        "queryData": [{
+                            "dataSource": "traces",
+                            "queryName": "A",
+                            "aggregateOperator": "count",
+                            "aggregateAttribute": {"key": "", "type": "tag", "dataType": "string"},
+                            "filters": {
+                                "expression": "service.name = 'checkout' AND has_error = true"
+                            },
+                            "groupBy": [{"key": "attribute.service.version", "type": "tag", "dataType": "string"}],
+                            "expression": "A",
+                            "disabled": false,
+                            "limit": 100
+                        }]
+                    }
+                }
+            },
+            {
+                "id": "top-n-routes",
+                "title": "Top 10 Routes (service.name + http.route)",
+                "description": "Rubric: cross-context group by + order by desc + limit 10.",
+                "panelTypes": "table",
+                "query": {
+                    "queryType": "builder",
+                    "builder": {
+                        "queryData": [{
+                            "dataSource": "traces",
+                            "queryName": "A",
+                            "aggregateOperator": "p95",
+                            "aggregateAttribute": {"key": "duration_nano", "type": "tag", "dataType": "float64"},
+                            "groupBy": [
+                                {"key": "service.name", "type": "resource", "dataType": "string"},
+                                {"key": "http.route", "type": "tag", "dataType": "string"}
+                            ],
+                            "orderBy": [{"columnName": "value", "order": "desc"}],
+                            "limit": 10,
+                            "expression": "A",
+                            "disabled": false
+                        }]
+                    }
+                }
+            },
+            {
+                "id": "per-tenant-having",
+                "title": "Having — Tenants with count() > 100",
+                "description": "Rubric: group by tenant.name with Having to cut noise from low-volume tenants.",
+                "panelTypes": "table",
+                "query": {
+                    "queryType": "builder",
+                    "builder": {
+                        "queryData": [{
+                            "dataSource": "traces",
+                            "queryName": "A",
+                            "aggregateOperator": "count",
+                            "aggregateAttribute": {"key": "", "type": "tag", "dataType": "string"},
+                            "filters": {"expression": "service.name = 'checkout'"},
+                            "groupBy": [{"key": "tenant.name", "type": "tag", "dataType": "string"}],
+                            "having": [{"columnName": "value", "op": ">", "value": 100}],
+                            "orderBy": [{"columnName": "value", "order": "desc"}],
+                            "limit": 10,
+                            "expression": "A",
+                            "disabled": false
+                        }]
+                    }
+                }
+            },
+            {
+                "id": "deploy-markers",
+                "title": "Deploy Guardian — deploy-bot Markers",
+                "description": "Deploy/rollback marker logs from service.name=deploy-bot. Correlate with error spikes above.",
+                "panelTypes": "graph",
+                "query": {
+                    "queryType": "builder",
+                    "builder": {
+                        "queryData": [{
+                            "dataSource": "logs",
+                            "queryName": "A",
+                            "aggregateOperator": "count",
+                            "aggregateAttribute": {"key": "", "type": "tag", "dataType": "string"},
+                            "filters": {"expression": "service.name = 'deploy-bot' AND body CONTAINS 'deployment'"},
+                            "expression": "A",
+                            "disabled": false,
+                            "limit": 100
+                        }]
+                    }
+                }
+            },
+            {
+                "id": "version-error-split",
+                "title": "Deploy Guardian — Error Rate by Version",
+                "description": "Side-by-side error counts per checkout version — the decisive deploy-correlation panel.",
+                "panelTypes": "graph",
+                "query": {
+                    "queryType": "builder",
+                    "builder": {
+                        "queryData": [
+                            {
+                                "dataSource": "traces",
+                                "queryName": "A",
+                                "aggregateOperator": "count",
+                                "aggregateAttribute": {"key": "", "type": "tag", "dataType": "string"},
+                                "filters": {"expression": "service.name = 'checkout' AND has_error = true"},
+                                "groupBy": [{"key": "attribute.service.version", "type": "tag", "dataType": "string"}],
+                                "limit": 10000,
+                                "expression": "A",
+                                "disabled": false
+                            },
+                            {
+                                "dataSource": "traces",
+                                "queryName": "B",
+                                "aggregateOperator": "count",
+                                "aggregateAttribute": {"key": "", "type": "tag", "dataType": "string"},
+                                "filters": {"expression": "service.name = 'checkout'"},
+                                "groupBy": [{"key": "attribute.service.version", "type": "tag", "dataType": "string"}],
+                                "limit": 10000,
+                                "expression": "B",
+                                "disabled": false
+                            }
+                        ],
+                        "queryFormulas": [{
+                            "queryName": "C",
+                            "expression": "A * 100 / B",
+                            "legend": "Error Rate % by Version",
+                            "disabled": false
+                        }]
+                    }
+                }
+            }
+        ]
+    }
+}

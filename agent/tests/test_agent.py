@@ -86,6 +86,18 @@ def test_rewrite_signoz_links():
     assert "signoz://" not in output_md
 
 
+def test_rewrite_signoz_view_links():
+    """Saved view placeholders rewrite to explorer URLs."""
+    from config import settings
+
+    settings.signoz_url = "http://signoz-test.internal:8080"
+    md = "[failing](signoz://view/AstroMart — Failing checkouts)"
+    out = rewrite_signoz_links(md)
+    assert "/traces-explorer?viewName=" in out
+    assert "AstroMart" in out
+    assert "signoz://" not in out
+
+
 def test_md_to_mrkdwn():
     """Markdown converts to Slack mrkdwn: headings, bold, links."""
     from slack import md_to_mrkdwn

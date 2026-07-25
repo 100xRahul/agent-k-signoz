@@ -56,6 +56,47 @@ def build_approval_url(action_id: str) -> str:
     return f"{settings.agent_public_url}/approve/{action_id}?sig={sig}"
 
 
+def _log_rca_to_console(
+    inv_id: str,
+    root_cause: str,
+    cost_usd: float,
+    tokens_in: int,
+    tokens_out: int,
+    trace_id: str,
+    report_md: str,
+) -> None:
+    """Print RCA summary to stdout when Slack is not configured."""
+    border = "=" * 60
+    preview = report_md[:1200] + ("..." if len(report_md) > 1200 else "")
+    trace_link = ""
+    if trace_id:
+        trace_link = f"\nTrace: {settings.signoz_url.rstrip('/')}/trace/{trace_id}"
+    print(
+        f"\n{border}\n"
+        f"🕶️  AGENT K RCA — {inv_id}\n"
+        f"{border}\n"
+        f"Root cause: {root_cause}\n"
+        f"Cost: ${cost_usd:.4f} ({tokens_in + tokens_out} tokens)"
+        f"{trace_link}\n"
+        f"Report: {settings.agent_public_url}/reports/{inv_id}\n"
+        f"{border}\n"
+        f"{preview}\n"
+        f"{border}\n",
+        flush=True,
+    )
+
+
+def _log_approval_to_console(action_id: str, kind: str, service: str, reason: str) -> None:
+    """Print remediation approval link when Slack is not configured."""
+    url = build_approval_url(action_id)
+    print(
+        f"\n🔧 REMEDIATION PROPOSED: {kind}({service})\n"
+        f"Reason: {reason}\n"
+        f"Approve: {url}\n",
+        flush=True,
+    )
+
+
 # ── Slack messaging ───────────────────────────────────────────────
 
 
@@ -64,10 +105,6 @@ async def post_rca(
     report_md: str,
 ) -> None:
     """Post RCA report to Slack via incoming webhook using Block Kit."""
-    if not settings.slack_webhook_url:
-        logger.info("No SLACK_WEBHOOK_URL configured — skipping Slack notification")
-        return
-
     inv_id = investigation.get("id", "unknown")
     root_cause = investigation.get("root_cause", "Unknown root cause")
     cost_usd = investigation.get("cost_usd", 0.0)
@@ -75,6 +112,11 @@ async def post_rca(
     tokens_out = investigation.get("tokens_out", 0)
     trace_id = investigation.get("trace_id", "")
     status = investigation.get("status", "done")
+
+    if not settings.slack_webhook_url:
+        logger.info("No SLACK_WEBHOOK_URL configured — skipping Slack notification")
+        _log_rca_to_console(inv_id, root_cause, cost_usd, tokens_in, tokens_out, trace_id, report_md)
+        return
 
     # Extract alertname from trigger
     alertname = "unknown"
@@ -170,6 +212,7 @@ async def post_remediation_proposal(
     """Post a remediation proposal with approval button to Slack."""
     if not settings.slack_webhook_url:
         logger.info("No SLACK_WEBHOOK_URL — skipping remediation notification")
+        _log_approval_to_console(action_id, kind, service, reason)
         return
 
     approval_url = build_approval_url(action_id)

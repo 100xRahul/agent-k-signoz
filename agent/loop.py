@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from openai import AsyncOpenAI
+from opentelemetry import trace
 
 from config import settings
 from models import InvestigationTrigger
@@ -22,6 +23,7 @@ from telemetry import (
     llm_call_span,
     record_cost,
     record_investigation_duration,
+    record_investigation_failed,
     record_investigation_started,
     set_investigation_result,
     set_llm_usage,
@@ -122,8 +124,9 @@ async def run_investigation(
     alertname = trigger.alertname
 
     record_investigation_started(alertname)
+    scenario = trigger.labels.get("scenario", "")
 
-    with investigation_span(trigger.type.value, alertname) as inv_span:
+    with investigation_span(trigger.type.value, alertname, scenario=scenario) as inv_span:
         trace_id = get_current_trace_id()
 
         # Update investigation with trace_id
@@ -198,6 +201,7 @@ async def run_investigation(
         total_cost = 0.0
         total_tokens_in = 0
         total_tokens_out = 0
+        tools_used_count = 0
         finished = False
         root_cause = ""
         confidence = ""
@@ -365,6 +369,7 @@ async def run_investigation(
                                 "failed" in result
                             )
                             set_tool_result(t_span, result_bytes, is_error)
+                        tools_used_count += 1
 
                         # Truncate result for context window
                         if len(result) > 15000:
@@ -440,8 +445,14 @@ async def run_investigation(
             root_cause=root_cause,
             confidence=confidence or "medium",
             total_cost_usd=total_cost,
+            tools_used_count=tools_used_count,
+            model=settings.openai_model,
         )
         record_investigation_duration(duration, alertname)
+        if status == "failed":
+            record_investigation_failed(alertname)
+            inv_span.set_attribute("error", True)
+            inv_span.set_status(trace.StatusCode.ERROR, root_cause[:200])
 
         # ── Notify Slack ──────────────────────────────────────────
         investigation = store.get_investigation(investigation_id)

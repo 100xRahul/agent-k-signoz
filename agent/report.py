@@ -65,7 +65,24 @@ def link_explorer(
     )
 
 
-# ── signoz:// placeholder rewriting ──────────────────────────────
+# Known saved view names → explorer routes (provisioned by make provision)
+_VIEW_ROUTES: dict[str, str] = {
+    "AstroMart — Failing checkouts": "/traces-explorer",
+    "AstroMart — Slow checkout": "/traces-explorer",
+    "AstroMart — Secret leak logs": "/logs-explorer",
+    "AstroMart — Deploy markers": "/logs-explorer",
+    "Agent K — LLM calls": "/traces-explorer",
+    "Agent K — MCP tool calls": "/traces-explorer",
+}
+
+
+def link_view(view_name: str) -> str:
+    """Link to a provisioned saved view in SigNoz (opens explorer tab)."""
+    base = settings.signoz_url.rstrip("/")
+    route = _VIEW_ROUTES.get(view_name, "/traces-explorer")
+    encoded = urllib.parse.quote(view_name, safe="")
+    return f"{base}{route}?viewName={encoded}"
+
 
 _EXPLORER_RE = re.compile(r"signoz://explorer/(traces|logs|metrics)\?([^)\n]*)")
 
@@ -86,6 +103,13 @@ def rewrite_signoz_links(report_md: str) -> str:
     report_md = re.sub(
         r"signoz://trace/([a-fA-F0-9]+)",
         rf"{base}/trace/\1",
+        report_md,
+    )
+
+    # Saved view shortcuts
+    report_md = re.sub(
+        r"signoz://view/([^)\n]+)",
+        lambda m: link_view(m.group(1).strip()),
         report_md,
     )
 

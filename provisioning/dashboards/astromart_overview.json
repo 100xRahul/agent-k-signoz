@@ -1,7 +1,7 @@
 {
     "data": {
         "title": "AstroMart Overview",
-        "description": "Service health, error rates, latency, and business metrics for the AstroMart sandbox",
+        "description": "Start here: error-rate % by service, rollout comparison by version, top slow routes, and business blast-radius KPIs. Trigger chaos with `make incident-*` then watch panels update.",
         "tags": [
             "agent-k",
             "sandbox"
@@ -63,11 +63,11 @@
                             {
                                 "dataSource": "traces",
                                 "queryName": "A",
-                                "aggregateOperator": "rate",
+                                "aggregateOperator": "count",
                                 "aggregateAttribute": {
-                                    "key": "has_error",
+                                    "key": "",
                                     "type": "tag",
-                                    "dataType": "bool"
+                                    "dataType": "string"
                                 },
                                 "filters": {
                                     "items": [
@@ -104,7 +104,55 @@
                                         "dataType": "string"
                                     }
                                 ],
+                                "limit": 10000,
                                 "expression": "A",
+                                "disabled": false
+                            },
+                            {
+                                "dataSource": "traces",
+                                "queryName": "B",
+                                "aggregateOperator": "count",
+                                "aggregateAttribute": {
+                                    "key": "",
+                                    "type": "tag",
+                                    "dataType": "string"
+                                },
+                                "filters": {
+                                    "items": [
+                                        {
+                                            "key": {
+                                                "key": "service.name",
+                                                "type": "resource",
+                                                "dataType": "string"
+                                            },
+                                            "op": "in",
+                                            "value": [
+                                                "gateway",
+                                                "checkout",
+                                                "payment",
+                                                "inventory"
+                                            ]
+                                        }
+                                    ],
+                                    "op": "AND"
+                                },
+                                "groupBy": [
+                                    {
+                                        "key": "service.name",
+                                        "type": "resource",
+                                        "dataType": "string"
+                                    }
+                                ],
+                                "limit": 10000,
+                                "expression": "B",
+                                "disabled": false
+                            }
+                        ],
+                        "queryFormulas": [
+                            {
+                                "queryName": "C",
+                                "expression": "A * 100 / B",
+                                "legend": "Error Rate %",
                                 "disabled": false
                             }
                         ]
@@ -317,7 +365,7 @@
                             {
                                 "dataSource": "traces",
                                 "queryName": "A",
-                                "aggregateOperator": "rate",
+                                "aggregateOperator": "count",
                                 "aggregateAttribute": {
                                     "key": "",
                                     "type": "tag",
@@ -334,7 +382,7 @@
                                     {
                                         "columnName": "value",
                                         "op": ">",
-                                        "value": 0.01
+                                        "value": 100
                                     }
                                 ],
                                 "expression": "A",

@@ -1,0 +1,20 @@
+{
+    "name": "AstroMart — Deploy markers",
+    "sourcePage": "logs",
+    "tags": ["agent-k", "deploy-guardian"],
+    "compositeQuery": {
+        "queryType": "builder",
+        "panelType": "list",
+        "queries": [{
+            "type": "builder_query",
+            "spec": {
+                "name": "A",
+                "signal": "logs",
+                "filter": {"expression": "service.name = 'deploy-bot'"},
+                "aggregations": [{"expression": "count()"}],
+                "limit": 100,
+                "order": [{"key": {"name": "timestamp"}, "direction": "desc"}]
+            }
+        }]
+    }
+}

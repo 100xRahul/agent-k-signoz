@@ -100,6 +100,7 @@ async def pay(request: Request) -> JSONResponse:
                 "eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIn0."
                 "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
             )
+            fake_rsa = "-----BEGIN RSA PRIVATE KEY-----\\nMIIEpAIBAAKCAQEA..."
             logger.error(
                 json.dumps(
                     {
@@ -108,6 +109,7 @@ async def pay(request: Request) -> JSONResponse:
                         "error": f"Auth failed for key={fake_key} jwt={fake_jwt}",
                         "aws_access_key_id": fake_key,
                         "token": fake_jwt,
+                        "leaked_key": fake_rsa,
                     }
                 )
             )

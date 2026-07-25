@@ -1,5 +1,6 @@
-.PHONY: up down nuke provision bootstrap logs check forge-signoz \
-       incident-bad-deploy incident-pool incident-flags incident-leak resolve demo
+.PHONY: up down nuke provision provision-fresh bootstrap logs check forge-signoz \
+       incident-bad-deploy incident-pool incident-flags incident-leak resolve demo \
+       demo-full demo-warm incident-budget verify verify-rubric test-live
 
 COMPOSE := docker compose
 SIGNOZ_COMPOSE := deploy/signoz/pours/deployment/compose.yaml
@@ -48,7 +49,20 @@ provision:
 	@echo "📊 Provisioning dashboards & alert rules..."
 	$(COMPOSE) exec agent python -m provisioning.provision
 
-# ──────────────────── Chaos / Incidents ────────────────────
+provision-fresh:
+	@echo "🔄 Fresh-provisioning Agent K resources (delete + recreate)..."
+	$(COMPOSE) exec agent python -m provisioning.provision --fresh
+
+test-live:
+	python3 scripts/test_live.py
+
+demo-warm: resolve
+	@echo "⏳ Baseline traffic (60s)..."
+	@sleep 60
+	@$(MAKE) incident-bad-deploy
+	@echo "⏳ Waiting for investigation via webhook..."
+	@python3 scripts/fire_webhook.py bad-deploy
+	@echo "👉 Watch reports → http://localhost:9000/reports"
 
 incident-bad-deploy:
 	@echo "💥 Triggering bad-deploy scenario..."
@@ -72,16 +86,34 @@ resolve:
 
 # ──────────────────── Demo ────────────────────
 
-demo: up
+demo: up bootstrap
 	@echo "⏳ Waiting for telemetry pipeline to warm up (30s)..."
 	@sleep 30
 	@echo "📊 Provisioning..."
 	@$(MAKE) provision
+	@docker compose up -d mcp-server agent
 	@echo "⏳ Letting baseline traffic flow (60s)..."
 	@sleep 60
 	@echo "💥 Triggering bad-deploy incident..."
 	@$(MAKE) incident-bad-deploy
 	@echo "🕶️  Agent K is on the case. Watch Slack for the RCA!"
+	@echo "    SigNoz alert eval ~3 min. Reports → http://localhost:9000/reports"
+
+demo-full: demo
+	@echo "⏳ Waiting for alert eval + investigation (up to 4 min)..."
+	@sleep 240
+	@python3 scripts/verify_checkpoints.py || true
+	@echo "👉 Approve rollback via Slack link or: curl 'http://localhost:9000/reports'"
+
+incident-budget:
+	@echo "💸 Spiking Agent K LLM budget for self-investigation demo..."
+	python3 scripts/incident_budget.py
+
+verify:
+	python3 scripts/verify_checkpoints.py
+
+verify-rubric:
+	python3 scripts/verify_rubric.py
 
 # ──────────────────── Code Quality ────────────────────
 

@@ -1,0 +1,44 @@
+{
+    "alert": "flag-combo-errors",
+    "alertType": "TRACES_BASED_ALERT",
+    "ruleType": "threshold_rule",
+    "version": "v5",
+    "evalWindow": "1m",
+    "frequency": "1m",
+    "condition": {
+        "compositeQuery": {
+            "queryType": "builder",
+            "panelType": "graph",
+            "queries": [
+                {
+                    "type": "builder_query",
+                    "spec": {
+                        "name": "A",
+                        "signal": "traces",
+                        "stepInterval": "60s",
+                        "limit": 100,
+                        "aggregations": [
+                            {"expression": "countIf(has_error = true)", "alias": "flag_combo_errors"}
+                        ],
+                        "filter": {
+                            "expression": "service.name = 'checkout' AND feature_flags CONTAINS 'new-checkout' AND feature_flags CONTAINS 'express-pay' AND has_error = true"
+                        }
+                    }
+                }
+            ]
+        },
+        "op": "above",
+        "target": 2,
+        "matchType": "at_least_once",
+        "selectedQueryName": "A"
+    },
+    "labels": {
+        "severity": "critical",
+        "service": "checkout",
+        "scenario": "flag-combo"
+    },
+    "annotations": {
+        "summary": "Flag-combo errors detected on checkout",
+        "description": "Checkout is failing for orders with BOTH new-checkout AND express-pay feature flags — filter with feature_flags CONTAINS on span attributes."
+    }
+}

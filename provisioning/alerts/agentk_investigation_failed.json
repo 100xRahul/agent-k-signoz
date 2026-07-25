@@ -1,0 +1,43 @@
+{
+    "alert": "agentk-investigation-failed",
+    "alertType": "METRIC_BASED_ALERT",
+    "ruleType": "threshold_rule",
+    "version": "v5",
+    "evalWindow": "5m",
+    "frequency": "1m",
+    "condition": {
+        "compositeQuery": {
+            "queryType": "builder",
+            "panelType": "graph",
+            "queries": [
+                {
+                    "type": "builder_query",
+                    "spec": {
+                        "name": "A",
+                        "signal": "metrics",
+                        "stepInterval": "60s",
+                        "aggregations": [
+                            {
+                                "metricName": "agentk.investigations.failed",
+                                "timeAggregation": "rate",
+                                "spaceAggregation": "sum"
+                            }
+                        ]
+                    }
+                }
+            ]
+        },
+        "op": "above",
+        "target": 0,
+        "matchType": "at_least_once",
+        "selectedQueryName": "A"
+    },
+    "labels": {
+        "severity": "warning",
+        "service": "agent-k"
+    },
+    "annotations": {
+        "summary": "Agent K investigation failed",
+        "description": "An Agent K investigation ended in failed status — check agent-k traces for MCP or LLM errors."
+    }
+}

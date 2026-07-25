@@ -1,0 +1,20 @@
+{
+    "name": "Agent K — MCP tool calls",
+    "sourcePage": "traces",
+    "tags": ["agent-k", "meta-observability", "mcp"],
+    "compositeQuery": {
+        "queryType": "builder",
+        "panelType": "list",
+        "queries": [{
+            "type": "builder_query",
+            "spec": {
+                "name": "A",
+                "signal": "traces",
+                "filter": {"expression": "service.name = 'agent-k' AND name LIKE 'tool.%'"},
+                "aggregations": [{"expression": "count()"}],
+                "limit": 100,
+                "order": [{"key": {"name": "timestamp"}, "direction": "desc"}]
+            }
+        }]
+    }
+}

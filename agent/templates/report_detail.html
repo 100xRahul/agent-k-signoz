@@ -170,6 +170,10 @@
             <span class="value"><a href="{{ signoz_url }}/trace/{{ investigation.trace_id }}">{{ investigation.trace_id[:16] }}...</a></span>
         </div>
         {% endif %}
+        <div class="meta-item">
+            <span class="label">Transcript</span>
+            <span class="value"><a href="/reports/{{ investigation.id }}/transcript">View tool-call audit trail</a></span>
+        </div>
     </div>
 
     <div class="report-content">

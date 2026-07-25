@@ -187,6 +187,115 @@ def provision_dashboards() -> None:
                 print(f"  ⚠️  Failed to create dashboard '{title}'")
 
 
+def _alert_names_from_files() -> set[str]:
+    alerts_dir = PROVISIONING_DIR / "alerts"
+    names: set[str] = set()
+    for alert_file in alerts_dir.glob("*.json"):
+        with open(alert_file) as f:
+            names.add(json.load(f).get("alert", alert_file.stem))
+    return names
+
+
+def _dashboard_titles_from_files() -> set[str]:
+    dashboards_dir = PROVISIONING_DIR / "dashboards"
+    titles: set[str] = set()
+    for dash_file in dashboards_dir.glob("*.json"):
+        with open(dash_file) as f:
+            dash_def = json.load(f)
+            content = dash_def.get("data", dash_def)
+            titles.add(content.get("title", dash_file.stem))
+    return titles
+
+
+def _view_names_from_files() -> set[str]:
+    views_dir = PROVISIONING_DIR / "views"
+    names: set[str] = set()
+    for view_file in views_dir.glob("*.json"):
+        with open(view_file) as f:
+            names.add(json.load(f).get("name", view_file.stem))
+    return names
+
+
+def delete_agent_k_resources() -> None:
+    """Remove Agent K dashboards, alerts, and views so provision can recreate them."""
+    print("🗑️  Deleting existing Agent K SigNoz resources...\n")
+
+    target_titles = _dashboard_titles_from_files()
+    existing = api("GET", "/dashboards")
+    if existing and isinstance(existing.get("data"), list):
+        for dash in existing["data"]:
+            stored = dash.get("data") or {}
+            title = stored.get("title", "")
+            if title in target_titles:
+                dash_id = dash.get("id")
+                if dash_id:
+                    resp = httpx.delete(
+                        f"{SIGNOZ_URL}/api/v1/dashboards/{dash_id}",
+                        headers=HEADERS,
+                        timeout=30.0,
+                    )
+                    if resp.status_code in (200, 204):
+                        print(f"  🗑️  Deleted dashboard '{title}'")
+                    else:
+                        print(
+                            f"  ⚠️  Failed to delete dashboard '{title}': "
+                            f"{resp.status_code}"
+                        )
+
+    target_alerts = _alert_names_from_files()
+    existing = api("GET", "/rules")
+    rules = (existing.get("data") or {}).get("rules", []) if existing else []
+    for rule in rules:
+        alert_name = rule.get("alert", "")
+        if alert_name in target_alerts:
+            rule_id = rule.get("id")
+            if rule_id:
+                resp = httpx.delete(
+                    f"{SIGNOZ_URL}/api/v1/rules/{rule_id}",
+                    headers=HEADERS,
+                    timeout=30.0,
+                )
+                if resp.status_code == 200:
+                    print(f"  🗑️  Deleted alert '{alert_name}'")
+                else:
+                    print(
+                        f"  ⚠️  Failed to delete alert '{alert_name}': "
+                        f"{resp.status_code}"
+                    )
+
+    target_views = _view_names_from_files()
+    existing = api("GET", "/explorer/views")
+    view_rows = existing.get("data") if existing else None
+    if isinstance(view_rows, list):
+        for view in view_rows:
+            name = view.get("name", "")
+            tags = view.get("tags") or []
+            if name in target_views or "agent-k" in tags:
+                view_id = view.get("id")
+                if view_id:
+                    resp = httpx.delete(
+                        f"{SIGNOZ_URL}/api/v1/explorer/views/{view_id}",
+                        headers=HEADERS,
+                        timeout=30.0,
+                    )
+                    if resp.status_code == 200:
+                        print(f"  🗑️  Deleted view '{name}'")
+                    else:
+                        print(
+                            f"  ⚠️  Failed to delete view '{name}': {resp.status_code}"
+                        )
+    print()
+
+
+def provision_fresh() -> None:
+    """Delete and recreate Agent K dashboards, alerts, and views."""
+    delete_agent_k_resources()
+    channel_names = provision_notification_channels()
+    provision_alerts(channel_names)
+    provision_dashboards()
+    provision_views()
+
+
 def main() -> None:
     print("🕶️  Agent K — Provisioning\n")
     print(f"SigNoz URL: {SIGNOZ_URL}")
@@ -211,9 +320,54 @@ def main() -> None:
 
     provision_alerts(channel_names)
     provision_dashboards()
+    provision_views()
 
     print("\n✅ Provisioning complete!")
 
 
+def provision_views() -> None:
+    """Provision saved Explorer views from JSON files."""
+    print("\n🔭 Provisioning saved Explorer views...")
+
+    views_dir = PROVISIONING_DIR / "views"
+    if not views_dir.exists():
+        print("  ⚠️  No views directory found")
+        return
+
+    existing = api("GET", "/explorer/views")
+    existing_names: set[str] = set()
+    if existing and isinstance(existing.get("data"), list):
+        for view in existing["data"]:
+            if view.get("name"):
+                existing_names.add(view["name"])
+
+    for view_file in sorted(views_dir.glob("*.json")):
+        with open(view_file) as f:
+            view_def = json.load(f)
+
+        name = view_def.get("name", view_file.stem)
+        cq = view_def.get("compositeQuery") or {}
+        if cq.get("queryType") == "builder" and "panelType" not in cq:
+            cq = {**cq, "panelType": "list"}
+            view_def = {**view_def, "compositeQuery": cq}
+        if name in existing_names:
+            print(f"  ✔️  View '{name}' already exists")
+            continue
+
+        result = api("POST", "/explorer/views", view_def)
+        if result:
+            print(f"  ✅ Created view '{name}'")
+        else:
+            print(f"  ⚠️  Failed to create view '{name}'")
+
+
 if __name__ == "__main__":
-    main()
+    import sys
+
+    if "--fresh" in sys.argv:
+        print("🕶️  Agent K — Fresh provisioning\n")
+        print(f"SigNoz URL: {SIGNOZ_URL}")
+        provision_fresh()
+        print("\n✅ Fresh provisioning complete!")
+    else:
+        main()

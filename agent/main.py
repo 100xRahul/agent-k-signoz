@@ -36,7 +36,9 @@ _running_alerts: set[str] = set()
 _background_tasks: set[asyncio.Task] = set()
 
 
-def should_investigate(alertname: str, alert_status: str) -> tuple[bool, str]:
+def should_investigate(
+    alertname: str, alert_status: str, fingerprint: str = ""
+) -> tuple[bool, str]:
     """Decide whether an incoming alert warrants a new investigation.
 
     Alerts re-fire on every evaluation interval, and SigNoz also notifies on
@@ -45,6 +47,9 @@ def should_investigate(alertname: str, alert_status: str) -> tuple[bool, str]:
     """
     if alert_status == "resolved":
         return False, "alert is resolved"
+
+    if fingerprint.startswith("test-"):
+        return True, "test webhook (cooldown bypass)"
 
     if alertname in _running_alerts:
         return False, "investigation already running"
@@ -93,7 +98,9 @@ async def webhook_signoz(
     for alert in webhook.alerts:
         alertname = alert.labels.get("alertname", "unknown")
 
-        ok, reason = should_investigate(alertname, alert.status.value)
+        ok, reason = should_investigate(
+            alertname, alert.status.value, alert.fingerprint
+        )
         if not ok:
             logger.info("Skipping alert %s: %s", alertname, reason)
             continue
@@ -223,6 +230,34 @@ async def _verify_and_update(
 
 
 # ── Reports ─────────────────────────────────────────────────────
+
+
+def _serialize_investigation(inv: dict) -> dict:
+    """Public JSON shape for an investigation."""
+    from report import format_investigation_for_list
+
+    base = format_investigation_for_list(inv)
+    base["report_md"] = inv.get("report_md")
+    base["finished_at"] = inv.get("finished_at")
+    return base
+
+
+@app.get("/api/investigations")
+async def api_list_investigations(limit: int = 50) -> JSONResponse:
+    """List investigations as JSON (for test harness and automation)."""
+    investigations = store.list_investigations(limit=limit)
+    return JSONResponse(
+        content={"investigations": [_serialize_investigation(i) for i in investigations]}
+    )
+
+
+@app.get("/api/investigations/{investigation_id}")
+async def api_get_investigation(investigation_id: str) -> JSONResponse:
+    """Get one investigation including report markdown."""
+    investigation = store.get_investigation(investigation_id)
+    if investigation is None:
+        raise HTTPException(status_code=404, detail="Investigation not found")
+    return JSONResponse(content=_serialize_investigation(investigation))
 
 
 @app.get("/reports", response_class=HTMLResponse)

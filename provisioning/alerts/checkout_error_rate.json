@@ -16,18 +16,44 @@
                         "name": "A",
                         "signal": "traces",
                         "stepInterval": "60s",
+                        "limit": 10000,
                         "aggregations": [
-                            {"expression": "countIf(has_error = true)", "alias": "error_count"}
+                            {"expression": "countIf(has_error = true)", "alias": "errors"}
                         ],
-                        "filter": {"expression": "service.name = 'checkout'"}
+                        "filter": {"expression": "service.name = 'checkout'"},
+                        "disabled": true
+                    }
+                },
+                {
+                    "type": "builder_query",
+                    "spec": {
+                        "name": "B",
+                        "signal": "traces",
+                        "stepInterval": "60s",
+                        "limit": 10000,
+                        "aggregations": [
+                            {"expression": "count()", "alias": "total"}
+                        ],
+                        "filter": {"expression": "service.name = 'checkout'"},
+                        "disabled": true
+                    }
+                },
+                {
+                    "type": "builder_formula",
+                    "spec": {
+                        "name": "F1",
+                        "expression": "A * 100 / B",
+                        "disabled": false,
+                        "limit": 100
                     }
                 }
             ]
         },
         "op": "above",
         "target": 10,
+        "targetUnit": "percent",
         "matchType": "at_least_once",
-        "selectedQueryName": "A"
+        "selectedQueryName": "F1"
     },
     "labels": {
         "severity": "critical",
@@ -35,7 +61,7 @@
         "scenario": "bad-deploy"
     },
     "annotations": {
-        "summary": "Checkout errors exceed 10/min",
-        "description": "The checkout service is failing more than 10 requests per minute, possibly due to a bad deployment."
+        "summary": "Checkout error rate exceeds 10%",
+        "description": "The checkout service error rate (countIf(has_error)/count * 100) exceeded 10% for 1 minute — likely a bad deployment or flag regression."
     }
 }

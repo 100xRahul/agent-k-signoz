@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 
 _tracer: trace.Tracer | None = None
 _investigations_counter: Counter | None = None
+_investigations_failed_counter: Counter | None = None
 _investigation_duration: Histogram | None = None
 _cost_counter: Counter | None = None
 
@@ -40,7 +41,7 @@ def get_tracer() -> trace.Tracer:
 
 def setup_telemetry(app: Any | None = None) -> None:
     """Initialize OTel providers, exporters, and instrument FastAPI."""
-    global _tracer, _investigations_counter, _investigation_duration, _cost_counter
+    global _tracer, _investigations_counter, _investigations_failed_counter, _investigation_duration, _cost_counter
 
     resource = Resource.create(
         {
@@ -69,6 +70,11 @@ def setup_telemetry(app: Any | None = None) -> None:
     _investigations_counter = meter.create_counter(
         "agentk.investigations",
         description="Total investigations started",
+        unit="1",
+    )
+    _investigations_failed_counter = meter.create_counter(
+        "agentk.investigations.failed",
+        description="Investigations that ended in failed status",
         unit="1",
     )
     _investigation_duration = meter.create_histogram(
@@ -102,6 +108,12 @@ def setup_telemetry(app: Any | None = None) -> None:
 # ── Metric helpers ────────────────────────────────────────────────
 
 
+def record_investigation_failed(alertname: str = "") -> None:
+    """Increment failed investigations counter."""
+    if _investigations_failed_counter:
+        _investigations_failed_counter.add(1, {"agentk.alertname": alertname})
+
+
 def record_investigation_started(alertname: str = "") -> None:
     """Increment the investigations counter."""
     if _investigations_counter:
@@ -127,16 +139,17 @@ def record_cost(cost_usd: float, model: str = "") -> None:
 def investigation_span(
     trigger_type: str,
     alertname: str,
+    scenario: str = "",
 ) -> Generator[Span, None, None]:
     """Create the root investigation span with Agent K attributes."""
     tracer = get_tracer()
-    with tracer.start_as_current_span(
-        "investigation",
-        attributes={
-            "agentk.trigger_type": trigger_type,
-            "agentk.alertname": alertname,
-        },
-    ) as span:
+    attrs: dict[str, Any] = {
+        "agentk.trigger_type": trigger_type,
+        "agentk.alertname": alertname,
+    }
+    if scenario:
+        attrs["agentk.scenario"] = scenario
+    with tracer.start_as_current_span("investigation", attributes=attrs) as span:
         yield span
 
 
@@ -145,11 +158,16 @@ def set_investigation_result(
     root_cause: str,
     confidence: str,
     total_cost_usd: float,
+    tools_used_count: int = 0,
+    model: str = "",
 ) -> None:
     """Set final result attributes on the investigation span."""
     span.set_attribute("agentk.root_cause", root_cause)
     span.set_attribute("agentk.confidence", confidence)
     span.set_attribute("agentk.total_cost_usd", total_cost_usd)
+    span.set_attribute("agentk.tools_used_count", tools_used_count)
+    if model:
+        span.set_attribute("gen_ai.request.model", model)
 
 
 @contextmanager

@@ -25,7 +25,7 @@ An autonomous on-call SRE agent that investigates production incidents through S
                                              Slack (RCA + approval)
 ```
 
-## 🚀 Quickstart (3 commands)
+## 🚀 Quickstart
 
 ```bash
 # 1. Configure
@@ -35,15 +35,25 @@ cp .env.example .env
 # 2. Start everything (SigNoz self-host via committed Foundry manifests + the stack)
 make up
 
-# 3. First-boot SigNoz setup — admin account, service account, API key → .env, automatic
+# 3. First-boot SigNoz setup — admin account, service account, API key → .env
 make bootstrap
 docker compose up -d mcp-server agent   # pick up the new API key
 
-# 4. Alerts + dashboards as code, then a scripted incident
+# 4. Alerts + dashboards + views as code, then a scripted incident
 make provision && make demo
 ```
 
-SigNoz UI: http://localhost:8080 (login saved to `~/signoz-login.txt` by bootstrap) · Agent K reports: http://localhost:9000/reports
+SigNoz UI: http://localhost:8080 · Agent K reports: http://localhost:9000/reports · **QB v5 Rubric** dashboard · **Watch the Watcher** meta-observability
+
+### Demo targets
+
+| Command | Purpose |
+|---------|---------|
+| `make demo` | Full stack + bad-deploy incident |
+| `make demo-full` | demo + wait for RCA + verify script |
+| `make incident-budget` | Self-investigation budget spike demo |
+| `make verify-rubric` | Run all 4 chaos scenarios |
+| `make verify` | Health + manual investigation check |
 
 ## 📊 Incident Scenarios
 
@@ -62,9 +72,9 @@ SigNoz UI: http://localhost:8080 (login saved to `~/signoz-login.txt` by bootstr
 | **Impact** | Real on-call pain solved; MTTR from alert→RCA in minutes; business-value blast radius |
 | **Creativity** | Closed loop: agent debugs via SigNoz *and* is observed by SigNoz; self-investigating budget alert |
 | **Technical Excellence** | Full OTel semconv (incl. gen_ai), dashboards/alerts-as-code, deterministic chaos harness, guarded remediation |
-| **Best Use of SigNoz** | All signals + dashboards + alerts + MCP server + QB v5 rubric queries as the playbook |
-| **UX** | Slack-native RCA with deep links + one-click approve; `/reports` web page; 3-command quickstart |
-| **Presentation** | Scripted demo video, architecture diagram, quality blog |
+| **Best Use of SigNoz** | All signals + dashboards + alerts + **MCP server** + **QB v5 rubric dashboard** + saved views |
+| **UX** | Slack-native RCA with deep links + one-click approve; `/reports` web page; 6 saved Explorer views |
+| **Presentation** | [Demo script](docs/demo-script.md) · [Submission blog](blog/submission-blog.md) · sample RCAs in `reports/` |
 
 ## 🔒 Security Notes
 
@@ -106,11 +116,13 @@ agent-k/
 │  ├─ slack.py                 # Slack Block Kit integration
 │  └─ store.py                 # SQLite state
 ├─ provisioning/
-│  ├─ dashboards/              # Dashboard JSON definitions
-│  ├─ alerts/                  # Alert rule definitions
+│  ├─ dashboards/              # 4 dashboards incl. QB v5 Rubric Showcase
+│  ├─ alerts/                  # 7 alert rules
+│  ├─ views/                   # 6 saved Explorer views
 │  └─ provision.py             # Idempotent provisioning script
-├─ reports/                    # Generated RCA reports
-└─ docs/                       # Architecture diagrams, demo script
+├─ reports/                    # Sample RCAs + generated reports
+├─ scripts/                    # verify_checkpoints, incident_budget, verify_rubric
+└─ docs/                       # demo-script.md, architecture.md
 ```
 
 ---

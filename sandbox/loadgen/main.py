@@ -10,6 +10,7 @@ import uuid
 from typing import Any
 
 import httpx
+import redis.asyncio as aioredis
 
 logging.basicConfig(
     level=logging.INFO,
@@ -20,6 +21,7 @@ logger = logging.getLogger("loadgen")
 TARGET = os.getenv("TARGET", "http://gateway:8001")
 RPS = int(os.getenv("RPS", "5"))
 SEED = int(os.getenv("SEED", "42"))
+REDIS_URL = os.getenv("REDIS_URL", "redis://sandbox-redis:6379")
 
 # ── Fake data ──────────────────────────────────────────────────────
 
@@ -41,8 +43,18 @@ PRODUCTS = [
 ]
 
 
-def _random_flags(rng: random.Random) -> list[str]:
-    """Return a random subset of feature flags."""
+def _random_flags(rng: random.Random, force_combo: bool = False) -> list[str]:
+    """Return a random subset of feature flags.
+
+    When flag-combo chaos is active, bias toward including BOTH new-checkout
+    and express-pay so the scenario reliably triggers alerts within eval window.
+    """
+    if force_combo:
+        extras = rng.sample(
+            [f for f in FEATURE_FLAGS_POOL if f not in ("new-checkout", "express-pay")],
+            k=rng.randint(0, 1),
+        )
+        return ["new-checkout", "express-pay", *extras]
     count = rng.randint(0, len(FEATURE_FLAGS_POOL))
     return rng.sample(FEATURE_FLAGS_POOL, count)
 
@@ -53,12 +65,14 @@ def _random_items(rng: random.Random) -> list[dict[str, Any]]:
     return rng.sample(PRODUCTS, count)
 
 
-async def _send_checkout(client: httpx.AsyncClient, rng: random.Random) -> None:
+async def _send_checkout(
+    client: httpx.AsyncClient, rng: random.Random, force_combo: bool = False
+) -> None:
     """Send a checkout request."""
     user = rng.choice(USERS)
     tenant = rng.choice(TENANTS)
     total = round(rng.uniform(5.0, 500.0), 2)
-    flags = _random_flags(rng)
+    flags = _random_flags(rng, force_combo=force_combo)
     items = _random_items(rng)
     order_id = str(uuid.uuid4())
 
@@ -96,6 +110,16 @@ async def _send_products(client: httpx.AsyncClient, rng: random.Random) -> None:
         logger.warning("products request failed: %s", exc)
 
 
+async def _flag_combo_active() -> bool:
+    try:
+        r = aioredis.from_url(REDIS_URL, decode_responses=True)
+        val = await r.get("chaos:flag-combo")
+        await r.aclose()
+        return val is not None and val != ""
+    except Exception:
+        return False
+
+
 async def _run() -> None:
     """Main load generation loop."""
     rng = random.Random(SEED)
@@ -108,10 +132,13 @@ async def _run() -> None:
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         while True:
+            combo_active = await _flag_combo_active()
             # Weighted mix: 70% checkout, 30% products
             roll = rng.random()
             if roll < 0.70:
-                asyncio.create_task(_send_checkout(client, rng))
+                # When flag-combo chaos is on, 60% of checkout traffic carries both flags
+                force_combo = combo_active and rng.random() < 0.60
+                asyncio.create_task(_send_checkout(client, rng, force_combo=force_combo))
             else:
                 asyncio.create_task(_send_products(client, rng))
 

@@ -1,0 +1,20 @@
+{
+    "name": "Agent K — LLM calls",
+    "sourcePage": "traces",
+    "tags": ["agent-k", "meta-observability"],
+    "compositeQuery": {
+        "queryType": "builder",
+        "panelType": "list",
+        "queries": [{
+            "type": "builder_query",
+            "spec": {
+                "name": "A",
+                "signal": "traces",
+                "filter": {"expression": "service.name = 'agent-k' AND name = 'llm.call'"},
+                "aggregations": [{"expression": "count()"}],
+                "limit": 100,
+                "order": [{"key": {"name": "timestamp"}, "direction": "desc"}]
+            }
+        }]
+    }
+}
