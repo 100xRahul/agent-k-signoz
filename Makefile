@@ -1,6 +1,7 @@
 .PHONY: up down nuke provision provision-fresh bootstrap logs check forge-signoz \
        incident-bad-deploy incident-pool incident-flags incident-leak resolve demo \
-       demo-full demo-warm incident-budget verify verify-rubric test-live
+       demo-full demo-warm incident-budget verify verify-rubric test-live \
+       benchmark benchmark-quick verify-ledger
 
 COMPOSE := docker compose
 SIGNOZ_COMPOSE := deploy/signoz/pours/deployment/compose.yaml
@@ -55,6 +56,19 @@ provision-fresh:
 
 test-live:
 	python3 scripts/test_live.py
+
+# ──────────────────── Benchmark & Ledger ────────────────────
+
+benchmark:
+	@echo "📊 agentk-bench (2 runs/class + healthy control)..."
+	python3 scripts/benchmark.py --runs 2
+
+benchmark-quick:
+	@echo "📊 agentk-bench (1 run/class, fast)..."
+	python3 scripts/benchmark.py --runs 1
+
+verify-ledger:
+	python3 scripts/verify_ledger.py
 
 demo-warm: resolve
 	@echo "⏳ Baseline traffic (60s)..."

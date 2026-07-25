@@ -4,89 +4,27 @@
 from __future__ import annotations
 
 import argparse
-import json
-import subprocess
 import sys
 import time
-import urllib.error
-import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _harness import (  # noqa: E402
+    ROOT,
+    fire_webhook,
+    get,
+    post_json,
+    run_make,
+    wait_investigation,
+)
+
 LOG_PATH = ROOT / "docs" / "TEST_LOG.md"
-
-
-def get(url: str, timeout: float = 15.0) -> tuple[int, str]:
-    req = urllib.request.Request(url)
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return resp.status, resp.read().decode()
-    except urllib.error.HTTPError as e:
-        return e.code, e.read().decode()
-
-
-def post_json(url: str, payload: dict, timeout: float = 30.0) -> tuple[int, str]:
-    data = json.dumps(payload).encode()
-    req = urllib.request.Request(
-        url,
-        data=data,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return resp.status, resp.read().decode()
-    except urllib.error.HTTPError as e:
-        return e.code, e.read().decode()
 
 
 def log(msg: str, lines: list[str]) -> None:
     print(msg)
     lines.append(msg)
-
-
-def wait_investigation(
-    agent_url: str,
-    timeout_s: int = 240,
-    predicate=None,
-    after_ts: float | None = None,
-) -> dict | None:
-    """Poll until an investigation matching predicate completes."""
-    deadline = time.time() + timeout_s
-    while time.time() < deadline:
-        code, body = get(f"{agent_url.rstrip('/')}/api/investigations?limit=20")
-        if code == 200:
-            data = json.loads(body)
-            for inv in data.get("investigations", []):
-                if inv.get("status") == "running":
-                    continue
-                if after_ts and inv.get("started_at"):
-                    try:
-                        started = datetime.fromisoformat(
-                            inv["started_at"].replace("Z", "+00:00")
-                        ).timestamp()
-                        if started < after_ts:
-                            continue
-                    except ValueError:
-                        pass
-                if predicate and not predicate(inv):
-                    continue
-                if inv.get("status") in ("done", "failed"):
-                    return inv
-        time.sleep(5)
-    return None
-
-
-def run_make(target: str) -> int:
-    return subprocess.call(["make", target], cwd=ROOT)
-
-
-def fire_webhook(scenario: str) -> int:
-    return subprocess.call(
-        [sys.executable, str(ROOT / "scripts" / "fire_webhook.py"), scenario],
-        cwd=ROOT,
-    )
 
 
 def append_test_log(lines: list[str], passed: bool) -> None:
