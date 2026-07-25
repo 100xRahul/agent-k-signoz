@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Agent K — Architecture</title>
+<style>
+  :root { color-scheme: light; }
+  html,body { margin:0; background:#ffffff; }
+  .wrap {
+    width: 1440px; padding: 28px 28px 20px; box-sizing: border-box;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background:#ffffff;
+  }
+  .hint { width:1440px; margin:6px auto 0; color:#94a3b8; font:13px/1.4 system-ui; text-align:center; }
+  h1 { margin:0 0 2px; font-size:26px; color:#0f172a; letter-spacing:-0.2px; }
+  .sub { margin:0 0 14px; font-size:15px; color:#64748b; }
+  .brand { font-weight:700; }
+  svg { display:block; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Agent K &mdash; an AI SRE that debugs <span style="color:#7c5cff">through</span> SigNoz, and is observed <span style="color:#16a34a">by</span> it</h1>
+  <p class="sub">A SigNoz alert wakes the agent &rarr; it investigates over the SigNoz MCP server &rarr; posts an audited RCA + guarded fix to Slack &rarr; and publishes its own run back into SigNoz.</p>
+
+  <svg width="1440" height="700" viewBox="0 0 1440 700" role="img" aria-label="Agent K architecture">
+    <defs>
+      <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#334155"/>
+      </marker>
+      <marker id="arrowAccent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#16a34a"/>
+      </marker>
+      <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
+        <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#0f172a" flood-opacity="0.10"/>
+      </filter>
+    </defs>
+
+    <!-- ============ COLUMN 1: SANDBOX ============ -->
+    <rect x="40" y="90" width="340" height="540" rx="16" fill="#eff5ff" stroke="#4f7cff" stroke-width="1.5" filter="url(#soft)"/>
+    <text x="210" y="122" text-anchor="middle" font-size="16" font-weight="700" fill="#1e3a8a">AstroMart &mdash; demo shop</text>
+    <text x="210" y="142" text-anchor="middle" font-size="12" fill="#64748b">4 FastAPI services, OpenTelemetry-instrumented</text>
+
+    <g font-size="14" font-weight="600" fill="#0f172a">
+      <rect x="95" y="160" width="230" height="42" rx="9" fill="#ffffff" stroke="#c7d7fe"/>
+      <text x="210" y="186" text-anchor="middle">gateway</text>
+      <rect x="95" y="214" width="230" height="42" rx="9" fill="#ffffff" stroke="#c7d7fe"/>
+      <text x="210" y="240" text-anchor="middle">checkout &nbsp;<tspan fill="#94a3b8" font-weight="400" font-size="12">(chaos modes)</tspan></text>
+      <rect x="95" y="268" width="230" height="42" rx="9" fill="#ffffff" stroke="#c7d7fe"/>
+      <text x="210" y="294" text-anchor="middle">payment</text>
+      <rect x="95" y="322" width="230" height="42" rx="9" fill="#ffffff" stroke="#c7d7fe"/>
+      <text x="210" y="348" text-anchor="middle">inventory</text>
+    </g>
+    <!-- internal flow arrows -->
+    <path d="M210,202 L210,214" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+    <path d="M210,256 L210,268" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+    <g font-size="12.5" fill="#334155">
+      <rect x="95" y="392" width="110" height="38" rx="8" fill="#f8fafc" stroke="#e2e8f0"/>
+      <text x="150" y="416" text-anchor="middle">Postgres</text>
+      <rect x="215" y="392" width="110" height="38" rx="8" fill="#f8fafc" stroke="#e2e8f0"/>
+      <text x="270" y="416" text-anchor="middle">Redis</text>
+      <rect x="95" y="440" width="110" height="38" rx="8" fill="#f8fafc" stroke="#e2e8f0"/>
+      <text x="150" y="464" text-anchor="middle">loadgen</text>
+      <rect x="215" y="440" width="110" height="38" rx="8" fill="#f8fafc" stroke="#e2e8f0"/>
+      <text x="270" y="464" text-anchor="middle">chaos CLI</text>
+    </g>
+    <text x="210" y="512" text-anchor="middle" font-size="12" fill="#64748b">5 fault signatures: bad&#8209;deploy, pool</text>
+    <text x="210" y="530" text-anchor="middle" font-size="12" fill="#64748b">exhaustion, flag&#8209;combo, secret&#8209;leak, healthy</text>
+
+    <!-- ============ COLUMN 2: SIGNOZ ============ -->
+    <rect x="560" y="150" width="300" height="420" rx="16" fill="#f4effe" stroke="#7c5cff" stroke-width="1.5" filter="url(#soft)"/>
+    <text x="710" y="184" text-anchor="middle" font-size="17" font-weight="700" fill="#5b21b6">SigNoz</text>
+    <text x="710" y="204" text-anchor="middle" font-size="12" fill="#64748b">self-hosted via Foundry</text>
+
+    <g font-size="13.5" font-weight="600" fill="#0f172a">
+      <rect x="595" y="226" width="230" height="40" rx="9" fill="#ffffff" stroke="#ddd6fe"/>
+      <text x="710" y="251" text-anchor="middle">Traces &middot; Logs &middot; Metrics</text>
+      <rect x="595" y="276" width="230" height="40" rx="9" fill="#ffffff" stroke="#ddd6fe"/>
+      <text x="710" y="301" text-anchor="middle">Query Builder v5</text>
+      <rect x="595" y="326" width="230" height="40" rx="9" fill="#ffffff" stroke="#ddd6fe"/>
+      <text x="710" y="351" text-anchor="middle">8 alerts &middot; 4 dashboards &middot; 6 views</text>
+      <rect x="595" y="376" width="230" height="40" rx="9" fill="#ede9fe" stroke="#7c5cff"/>
+      <text x="710" y="401" text-anchor="middle" fill="#5b21b6">MCP server &nbsp;<tspan fill="#7c5cff" font-weight="400" font-size="12">(14 tools)</tspan></text>
+    </g>
+    <text x="710" y="448" text-anchor="middle" font-size="12.5" fill="#64748b">"Watch the Watcher" dashboard renders</text>
+    <text x="710" y="466" text-anchor="middle" font-size="12.5" fill="#64748b">the agent's own cost &amp; groundedness</text>
+    <rect x="595" y="492" width="230" height="54" rx="9" fill="#faf5ff" stroke="#e9d5ff"/>
+    <text x="710" y="514" text-anchor="middle" font-size="12.5" fill="#6b21a8">self-alert: when the agent's cost</text>
+    <text x="710" y="532" text-anchor="middle" font-size="12.5" fill="#6b21a8">spikes, it investigates <tspan font-weight="700">itself</tspan></text>
+
+    <!-- ============ COLUMN 3: AGENT K ============ -->
+    <rect x="1040" y="150" width="360" height="330" rx="16" fill="#effaf1" stroke="#16a34a" stroke-width="1.5" filter="url(#soft)"/>
+    <text x="1220" y="184" text-anchor="middle" font-size="17" font-weight="700" fill="#166534">Agent K</text>
+    <text x="1220" y="204" text-anchor="middle" font-size="12" fill="#64748b">FastAPI &middot; OpenAI-compatible LLM</text>
+
+    <g font-size="13.5" font-weight="600" fill="#0f172a">
+      <rect x="1070" y="222" width="300" height="42" rx="9" fill="#ffffff" stroke="#bbf7d0"/>
+      <text x="1220" y="248" text-anchor="middle">LLM tool-use loop (one <tspan font-style="italic">step</tspan> surface)</text>
+      <rect x="1070" y="274" width="300" height="42" rx="9" fill="#ffffff" stroke="#bbf7d0"/>
+      <text x="1220" y="300" text-anchor="middle">independent auditor &mdash; groundedness</text>
+      <rect x="1070" y="326" width="300" height="42" rx="9" fill="#ffffff" stroke="#bbf7d0"/>
+      <text x="1220" y="352" text-anchor="middle">hash-chained audit ledger</text>
+      <rect x="1070" y="378" width="300" height="42" rx="9" fill="#ffffff" stroke="#bbf7d0"/>
+      <text x="1220" y="404" text-anchor="middle">guarded remediation (rollback/flag/restart)</text>
+    </g>
+    <text x="1220" y="448" text-anchor="middle" font-size="12" fill="#64748b">deterministic where it counts, model where it helps</text>
+
+    <!-- ============ SLACK ============ -->
+    <rect x="1090" y="560" width="260" height="64" rx="14" fill="#fdf2f8" stroke="#ec4899" stroke-width="1.5" filter="url(#soft)"/>
+    <text x="1220" y="588" text-anchor="middle" font-size="15" font-weight="700" fill="#9d174d">Slack</text>
+    <text x="1220" y="608" text-anchor="middle" font-size="12.5" fill="#64748b">RCA + one-click approval</text>
+
+    <!-- ============ ARROWS ============ -->
+    <!-- Sandbox -> SigNoz : OTLP -->
+    <path d="M380,330 C460,330 480,360 558,360" fill="none" stroke="#334155" stroke-width="2" marker-end="url(#arrow)"/>
+    <rect x="430" y="322" width="52" height="22" rx="6" fill="#ffffff"/>
+    <text x="456" y="338" text-anchor="middle" font-size="13" font-weight="600" fill="#334155">OTLP</text>
+
+    <!-- SigNoz -> Agent K : alert webhook -->
+    <path d="M860,232 C940,232 960,236 1038,236" fill="none" stroke="#334155" stroke-width="2" marker-end="url(#arrow)"/>
+    <rect x="878" y="206" width="118" height="22" rx="6" fill="#ffffff"/>
+    <text x="937" y="222" text-anchor="middle" font-size="13" font-weight="600" fill="#334155">alert webhook</text>
+
+    <!-- Agent K -> SigNoz : MCP reads -->
+    <path d="M1038,300 C960,300 940,330 862,330" fill="none" stroke="#334155" stroke-width="2" marker-end="url(#arrow)"/>
+    <rect x="880" y="300" width="132" height="22" rx="6" fill="#ffffff"/>
+    <text x="946" y="316" text-anchor="middle" font-size="13" font-weight="600" fill="#334155">MCP / API v5 &middot; reads</text>
+
+    <!-- Agent K -> SigNoz : own traces (accent = closed loop) -->
+    <path d="M1038,398 C950,398 940,430 862,430" fill="none" stroke="#16a34a" stroke-width="2.2" stroke-dasharray="7 4" marker-end="url(#arrowAccent)"/>
+    <rect x="866" y="430" width="164" height="22" rx="6" fill="#ffffff"/>
+    <text x="948" y="446" text-anchor="middle" font-size="12.5" font-weight="700" fill="#16a34a">own traces: gen_ai &middot; cost &middot; audit</text>
+
+    <!-- Agent K -> Slack -->
+    <path d="M1220,480 L1220,558" fill="none" stroke="#334155" stroke-width="2" marker-end="url(#arrow)"/>
+    <rect x="1146" y="508" width="148" height="22" rx="6" fill="#ffffff"/>
+    <text x="1220" y="524" text-anchor="middle" font-size="12.5" font-weight="600" fill="#334155">RCA + guarded rollback</text>
+
+    <!-- closed-loop caption -->
+    <text x="720" y="660" text-anchor="middle" font-size="15" font-weight="700" fill="#0f172a">SigNoz observes the agent that observes SigNoz.</text>
+  </svg>
+  <p class="hint">Tip: zoom your browser to ~150&percnt; and screenshot this card for a crisp, high-resolution PNG.</p>
+</div>
+</body>
+</html>
