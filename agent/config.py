@@ -17,6 +17,11 @@ class Settings(BaseSettings):
     llm_input_price_per_mtok: float = 0.0
     llm_output_price_per_mtok: float = 0.0
 
+    # Sampling temperature. Some models (e.g. gpt-5*) only accept the default and
+    # reject an explicit 0 — leave unset to OMIT temperature from the request;
+    # set to 0 for deterministic runs on models that support it.
+    llm_temperature: float | None = None
+
     # ── Independent auditor (groundedness gate) ───────────────────
     # A second LLM pass, with its own fresh context, screens each finished RCA
     # for groundedness before it is published. Enabled by default.

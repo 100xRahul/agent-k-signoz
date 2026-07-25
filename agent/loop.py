@@ -250,11 +250,11 @@ async def run_investigation(
                 # ── LLM call ──────────────────────────────────────
                 with llm_call_span(settings.openai_model) as llm_span:
                     try:
-                        response = await client.chat.completions.create(
-                            model=settings.openai_model,
-                            messages=messages,
-                            tools=all_tools,
-                            tool_choice=(
+                        create_kwargs: dict[str, Any] = {
+                            "model": settings.openai_model,
+                            "messages": messages,
+                            "tools": all_tools,
+                            "tool_choice": (
                                 {
                                     "type": "function",
                                     "function": {"name": "finish_investigation"},
@@ -262,8 +262,11 @@ async def run_investigation(
                                 if last_chance
                                 else "auto"
                             ),
-                            temperature=0,
-                        )
+                        }
+                        # gpt-5* reject an explicit temperature; only send it when configured.
+                        if settings.llm_temperature is not None:
+                            create_kwargs["temperature"] = settings.llm_temperature
+                        response = await client.chat.completions.create(**create_kwargs)
                     except Exception as exc:
                         logger.exception("LLM call failed at iteration %d", iteration)
                         set_llm_usage(llm_span, 0, 0, 0.0)
@@ -453,11 +456,18 @@ async def run_investigation(
         # needs the finding) but is badged and counted. Fail loud on error.
         audit = AuditResult(outcome="skipped")
         if status == "done" and settings.auditor_enabled:
-            evidence = "\n\n---\n\n".join(
+            tool_evidence = "\n\n---\n\n".join(
                 m.get("content", "")
                 for m in messages
                 if m.get("role") == "tool" and m.get("content")
             )
+            # Give the auditor the trigger as ground truth so it doesn't flag the
+            # alert name / fired-time (which come from the alert, not a tool call).
+            context_block = (
+                "## INVESTIGATION CONTEXT (the triggering alert — treat as ground truth)\n"
+                + render_trigger(trigger.model_dump())
+            )
+            evidence = context_block + "\n\n---\n\n" + tool_evidence
             try:
                 audit = await audit_rca(report_md, evidence)
             except Exception:

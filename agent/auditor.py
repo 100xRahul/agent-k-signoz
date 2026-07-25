@@ -28,28 +28,40 @@ logger = logging.getLogger(__name__)
 AUDITOR_SYSTEM_PROMPT = """You are an independent RCA auditor. A separate agent \
 wrote the incident report below. You did NOT write it and you do not trust it.
 
-Your only job is to check GROUNDEDNESS: is every factual claim in the report — \
-especially every NUMBER (error rates, latencies, dollar amounts, user/tenant \
-counts, version strings) — supported by the EVIDENCE provided? The evidence is \
-the raw tool output the writing agent actually collected.
+Your only job is to check the GROUNDEDNESS of the report's ANALYTICAL claims — \
+the substantive findings about the incident: the root cause, and every NUMBER \
+(error rates, latencies, dollar amounts, user/tenant counts, error counts, \
+version strings, and timestamps of OBSERVED events like deploys or error onset). \
+Is each such claim supported by the EVIDENCE provided (the raw tool output the \
+agent collected) or the INVESTIGATION CONTEXT block?
 
 Rules:
-- A claim is UNSUPPORTED if its specific value does not appear in, and cannot be \
-directly computed from, the evidence.
+- The INVESTIGATION CONTEXT block (the alert that triggered the run — its name, \
+its fired/started time, labels, annotations, scenario) is GROUND TRUTH. Any \
+claim that merely restates it (e.g. the alert name or the alert-fired timestamp) \
+is grounded — do NOT flag it.
+- IGNORE procedural and system boilerplate. These are NOT analytical claims and \
+must NEVER be flagged: action IDs, approval endpoints/URLs (e.g. \
+"/approve/..."), "Awaiting human approval", "Investigation finished", "Report \
+saved", the agent's own Confidence label, the cost/token footer, "Investigation \
+started: now", and generic status lines. Judge only substantive claims about the \
+incident itself.
+- A substantive claim is UNSUPPORTED only if its specific value does not appear \
+in, and cannot be directly computed from, the evidence or context.
 - Vague prose ("errors increased") without a backing number is a weak claim, not \
-necessarily unsupported — only flag numbers/entities that are stated as fact.
-- Do NOT re-investigate or add new analysis. Judge only what is written vs the \
-evidence given.
-- Be strict but fair: if the evidence clearly backs a claim, it is grounded.
+unsupported — only flag concrete numbers/entities stated as fact.
+- Do NOT re-investigate or add new analysis. Judge only what is written.
+- Be fair: if the evidence or context clearly backs a claim, it is grounded.
 
 Respond with ONLY a JSON object, no prose, in exactly this shape:
 {
   "grounded": true|false,
-  "score": 0.0-1.0,          // fraction of factual claims that are supported
+  "score": 0.0-1.0,          // fraction of SUBSTANTIVE claims that are supported
   "unsupported_claims": ["<claim>", ...],
   "notes": "<one-sentence overall assessment>"
 }
-"grounded" is true only when there are no material unsupported claims."""
+"grounded" is true when there are no material unsupported SUBSTANTIVE claims \
+(ignore boilerplate entirely when deciding)."""
 
 
 @dataclass
@@ -106,8 +118,18 @@ async def audit_rca(report_md: str, evidence: str) -> AuditResult:
         api_key=settings.effective_auditor_api_key,
     )
     # Evidence can be large; cap it so the audit call stays cheap and bounded.
-    if len(evidence) > 45000:
-        evidence = evidence[:45000] + "\n... [evidence truncated]"
+    # Keep BOTH ends: blast-radius / business-impact queries run last, so a
+    # front-only truncation would hide exactly the numbers the auditor must
+    # check. Keep a generous head and the full tail.
+    cap = 120000
+    if len(evidence) > cap:
+        head = int(cap * 0.6)
+        tail = cap - head
+        evidence = (
+            evidence[:head]
+            + "\n\n... [middle of evidence truncated] ...\n\n"
+            + evidence[-tail:]
+        )
 
     user_msg = (
         f"## INCIDENT REPORT (under audit)\n\n{report_md}\n\n"
@@ -116,14 +138,17 @@ async def audit_rca(report_md: str, evidence: str) -> AuditResult:
 
     with audit_call_span(model) as span:
         try:
-            resp = await client.chat.completions.create(
-                model=model,
-                messages=[
+            audit_kwargs: dict[str, Any] = {
+                "model": model,
+                "messages": [
                     {"role": "system", "content": AUDITOR_SYSTEM_PROMPT},
                     {"role": "user", "content": user_msg},
                 ],
-                temperature=0,
-            )
+            }
+            # gpt-5* reject an explicit temperature; only send it when configured.
+            if settings.llm_temperature is not None:
+                audit_kwargs["temperature"] = settings.llm_temperature
+            resp = await client.chat.completions.create(**audit_kwargs)
         except Exception as exc:
             logger.exception("Auditor LLM call failed")
             set_llm_usage(span, 0, 0, 0.0)
