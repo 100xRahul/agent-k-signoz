@@ -54,6 +54,22 @@ SigNoz UI: http://localhost:8080 · Agent K reports: http://localhost:9000/repor
 | `make incident-budget` | Self-investigation budget spike demo |
 | `make verify-rubric` | Run all 4 chaos scenarios |
 | `make verify` | Health + manual investigation check |
+| `make benchmark` | agentk-bench: scored run + 0%-false-alarm control → `docs/benchmark/` |
+| `make verify-ledger` | Prove the hash-chained audit ledger is intact |
+
+### Measured, checked, and provable
+
+Beyond the demo, three things a judge can verify independently:
+
+- **Measured, not demoed** — `make benchmark` scores live investigations
+  deterministically (detection / localization / classification / remediation +
+  **0% false alarms** on a healthy control) into `docs/benchmark/BENCHMARK.md`.
+  Deterministic scoring means a run can't pass on a hallucinated RCA.
+- **The writer is checked, not trusted** — an independent auditor model screens
+  every finished RCA for groundedness before publish; ungrounded reports are
+  badged and counted (`agentk.audit.groundedness`, `agentk-ungrounded-rca` alert).
+- **Governed / provable** — every step is sealed into a hash-chained ledger;
+  `make verify-ledger` recomputes the chain and proves it was not tampered with.
 
 ## 📊 Incident Scenarios
 
@@ -70,8 +86,8 @@ SigNoz UI: http://localhost:8080 · Agent K reports: http://localhost:9000/repor
 | Criterion | How Agent K delivers |
 |---|---|
 | **Impact** | Real on-call pain solved; MTTR from alert→RCA in minutes; business-value blast radius |
-| **Creativity** | Closed loop: agent debugs via SigNoz *and* is observed by SigNoz; self-investigating budget alert |
-| **Technical Excellence** | Full OTel semconv (incl. gen_ai), dashboards/alerts-as-code, deterministic chaos harness, guarded remediation |
+| **Creativity** | Closed loop: agent debugs via SigNoz *and* is observed by SigNoz; self-investigating budget alert; independent auditor screens its own RCAs |
+| **Technical Excellence** | Full OTel semconv (incl. gen_ai), dashboards/alerts-as-code, deterministic chaos harness, guarded remediation, hash-chained audit ledger, **scored benchmark with 0% false alarms** |
 | **Best Use of SigNoz** | All signals + dashboards + alerts + **MCP server** + **QB v5 rubric dashboard** + saved views |
 | **UX** | Slack-native RCA with deep links + one-click approve; `/reports` web page; 6 saved Explorer views |
 | **Presentation** | [Demo script](docs/demo-script.md) · [Submission blog](blog/submission-blog.md) · sample RCAs in `reports/` |
@@ -106,18 +122,22 @@ agent-k/
 │  ├─ loadgen/                 # Traffic generator
 │  └─ chaos/                   # Chaos scenario CLI
 ├─ agent/
-│  ├─ main.py                  # FastAPI endpoints
-│  ├─ loop.py                  # Agent reasoning loop
+│  ├─ main.py                  # FastAPI endpoints (+ ledger verify/read)
+│  ├─ loop.py                  # Agent reasoning loop (+ auditor gate, ledger seals)
+│  ├─ auditor.py               # Independent groundedness auditor (2nd LLM pass)
 │  ├─ playbook.py              # SRE investigation runbook
 │  ├─ tools_mcp.py             # SigNoz MCP client (the only tool path — fail loud)
 │  ├─ remediation.py           # Guarded actions
-│  ├─ telemetry.py             # gen_ai OTel spans + cost
-│  ├─ report.py                # RCA report generation
-│  ├─ slack.py                 # Slack Block Kit integration
-│  └─ store.py                 # SQLite state
+│  ├─ telemetry.py             # gen_ai OTel spans + cost + audit metric
+│  ├─ report.py                # RCA report generation + audit badge
+│  └─ store.py                 # SQLite state + hash-chained ledger
+├─ scripts/
+│  ├─ benchmark.py             # agentk-bench (scored, deterministic)
+│  ├─ verify_ledger.py         # Prove the ledger chain is intact
+│  └─ _harness.py              # Shared live-run plumbing
 ├─ provisioning/
 │  ├─ dashboards/              # 4 dashboards incl. QB v5 Rubric Showcase
-│  ├─ alerts/                  # 7 alert rules
+│  ├─ alerts/                  # 8 alert rules (incl. agentk-ungrounded-rca)
 │  ├─ views/                   # 6 saved Explorer views
 │  └─ provision.py             # Idempotent provisioning script
 ├─ reports/                    # Sample RCAs + generated reports

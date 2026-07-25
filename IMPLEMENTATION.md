@@ -2,7 +2,7 @@
 
 > **Purpose:** Quick technical reference for the entire codebase. Read this instead of re-reading all source files. Kept up-to-date as changes are made.
 >
-> **Last updated:** 2026-07-20 (live-test pass: 4 dashboards, 7 alerts, 6 views, `make test-live`, `make provision-fresh`)
+> **Last updated:** 2026-07-25 (kassi-inspired credibility pass: independent auditor gate, hash-chained ledger, scored agentk-bench)
 
 ---
 
@@ -33,6 +33,7 @@ signoz-hacakethon/
 │   ├── main.py                  # FastAPI: webhooks, approvals, reports, GET /api/investigations
 │   ├── models.py                # Pydantic models: AlertmanagerWebhook, triggers
 │   ├── loop.py                  # Agent reasoning loop (tool-use over OpenAI API)
+│   ├── auditor.py               # Independent groundedness auditor (2nd LLM pass)
 │   ├── playbook.py              # System prompt (SRE runbook, 8 investigation steps)
 │   ├── tools_mcp.py             # MCP client (streamable HTTP, 14-tool allowlist).
 │   │                            #   MCP is the ONLY tool path — no REST fallback;
@@ -40,7 +41,7 @@ signoz-hacakethon/
 │   ├── remediation.py           # Guarded actions: rollback, disable_flag, restart
 │   ├── report.py                # signoz:// link rewriting, HTML rendering
 │   ├── slack.py                 # Block Kit messages, HMAC approval links; console RCA when no Slack
-│   ├── store.py                 # SQLite (WAL): investigations + actions tables
+│   ├── store.py                 # SQLite (WAL): investigations + actions + hash-chained ledger
 │   ├── telemetry.py             # OTel setup: traces, metrics, logs, gen_ai semconv
 │   ├── templates/
 │   │   ├── reports.html         # Reports list page (dark monospace)
@@ -91,18 +92,22 @@ signoz-hacakethon/
 │   │   ├── watch_the_watcher.json    # Agent meta-observability
 │   │   ├── llm_cost.json            # LLM token/cost tracking
 │   │   └── qb_v5_rubric.json        # QB v5 rubric showcase (11 panels)
-│   ├── alerts/                  # 7 alert rules (incl. flag-combo, agentk-investigation-failed)
+│   ├── alerts/                  # 8 alert rules (incl. flag-combo, agentk-investigation-failed, agentk-ungrounded-rca)
 │   └── views/                   # 6 saved Explorer views (panelType: list required)
 │
 ├── scripts/
+│   ├── _harness.py              # Shared live-run plumbing (get/post/poll)
 │   ├── fire_webhook.py          # POST test Alertmanager payload by scenario
 │   ├── test_live.py             # Live E2E harness (`make test-live`)
+│   ├── benchmark.py             # agentk-bench: scored deterministic benchmark
+│   ├── verify_ledger.py         # Prove the hash-chained ledger is intact
 │   ├── verify_checkpoints.py
 │   ├── verify_rubric.py
 │   └── incident_budget.py
 │
 ├── docs/
 │   ├── TEST_LOG.md              # Live test results with timestamps
+│   ├── benchmark/               # BENCHMARK.md + results.json (generated)
 │   ├── demo-script.md
 │   └── architecture.md
 └── deploy/
@@ -124,10 +129,12 @@ SigNoz Alert → POST /webhook/signoz (main.py)
   → create investigation record (store.py)
   → run_investigation(trigger, investigation_id) (loop.py)
     → LLM loop with PLAYBOOK system prompt (playbook.py)
-    → Tool calls via MCP (tools_mcp.py) or REST (tools_rest.py)
+    → Tool calls via MCP only (tools_mcp.py) — no REST fallback
     → propose_remediation → store action + Slack msg (slack.py)
-    → finish_investigation → rewrite links (report.py)
-    → persist to SQLite (store.py)
+    → finish_investigation → assemble report
+    → independent auditor groundedness gate (auditor.py) — badge report
+    → rewrite links + cost footer (report.py)
+    → persist to SQLite + seal ledger verdict (store.py)
     → post RCA to Slack (slack.py)
 ```
 
@@ -155,6 +162,10 @@ All via env vars (pydantic-settings `Settings` class, singleton at `config.setti
 | `OPENAI_MODEL` | `gpt-4o-mini` | Model name |
 | `LLM_INPUT_PRICE_PER_MTOK` | `0` | Cost per M input tokens |
 | `LLM_OUTPUT_PRICE_PER_MTOK` | `0` | Cost per M output tokens |
+| `AUDITOR_ENABLED` | `true` | Run the independent groundedness auditor |
+| `AUDITOR_MODEL` | `""` | Auditor model (empty → `OPENAI_MODEL`; set different for true independence) |
+| `AUDITOR_BASE_URL` | `""` | Auditor endpoint (empty → `OPENAI_BASE_URL`) |
+| `AUDITOR_API_KEY` | `""` | Auditor auth (empty → `OPENAI_API_KEY`) |
 | `SIGNOZ_URL` | `http://localhost:8080` | Browser-facing SigNoz URL |
 | `SIGNOZ_API_KEY` | `""` | SigNoz API auth key |
 | `MCP_URL` | `http://mcp-server:8000` | MCP server internal URL |
@@ -177,11 +188,17 @@ SQLite in WAL mode. Singleton `store` instance. Two tables:
 ```sql
 investigations(id TEXT PK, trigger_json TEXT, status TEXT,  -- running|done|failed
   started_at TEXT, finished_at TEXT, report_md TEXT, root_cause TEXT,
-  cost_usd REAL, tokens_in INT, tokens_out INT, trace_id TEXT);
+  cost_usd REAL, tokens_in INT, tokens_out INT, trace_id TEXT,
+  transcript_json TEXT,                          -- full LLM/tool transcript
+  audit_grounded INT, audit_score REAL, audit_json TEXT);  -- auditor verdict
 
 actions(id TEXT PK, investigation_id TEXT FK, kind TEXT, params_json TEXT,
   status TEXT,  -- proposed|approved|executed|verified|rejected
   created_at TEXT, executed_at TEXT, verification_md TEXT);
+
+-- Append-only, hash-chained audit ledger (tamper-evident).
+ledger(seq INTEGER PK AUTOINCREMENT, investigation_id TEXT, ts TEXT,
+  entry_type TEXT, payload_json TEXT, prev_hash TEXT, entry_hash TEXT);
 ```
 
 ---
@@ -212,6 +229,62 @@ The field-discovery tools (`get_field_keys`/`get_field_values`) let the agent ad
 
 ### Tool Routing
 MCP only (`tools_mcp.py` — streamable HTTP to `mcp-server:8000/mcp`). No REST fallback: if MCP is unreachable the investigation is marked `failed` with a clear report (fail loudly, never degrade silently). Remediation verification queries SigNoz directly via `query_range` v5 (`remediation.py:_error_count`).
+
+---
+
+## Credibility Features (kassi-inspired)
+
+Three additions that make the agent measurable, checked, and provable — each
+independently verifiable by a judge.
+
+### 1. Independent auditor gate (`agent/auditor.py`)
+After the writer LLM produces the RCA (but **before** publish), a second,
+independent LLM pass — its own fresh context, no shared history — screens the
+report for **groundedness**: is every factual claim (especially numbers) backed
+by the evidence the agent actually collected? Returns
+`{grounded, score, unsupported_claims, notes}`.
+
+- **Advisory, not blocking:** an ungrounded RCA still ships (an SRE needs the
+  finding) but is badged `⚠️ ungrounded` with the flagged claims. Grounded →
+  `✅ grounded`. Audit call error → `⚠️ audit: error` (fail loud, never silently
+  "grounded").
+- Wired in `loop.py` post-loop, before persist. Cost/tokens roll into the
+  investigation total; a dedicated `audit.call` span carries gen_ai usage.
+- **Config:** `AUDITOR_ENABLED` (default true), `AUDITOR_MODEL` (empty → reuse
+  `OPENAI_MODEL`; point at a *different* model for true independence),
+  `AUDITOR_BASE_URL`, `AUDITOR_API_KEY`.
+- **Surfaced:** report badge (`report.py:audit_badge`), span attr
+  `agentk.audit.grounded`/`agentk.audit.outcome`, metric
+  `agentk.audit.groundedness` (by outcome), stored `audit_grounded/score/json`
+  columns, `agentk-ungrounded-rca` alert, "Watch the Watcher" groundedness panel.
+
+### 2. Hash-chained audit ledger (`agent/store.py`)
+Every investigation step is sealed into an append-only, hash-chained `ledger`
+table: `entry_hash = sha256(prev_hash + canonical_json(sealed_payload))`, genesis
+= 64 zeros. Any later edit to a row breaks the chain from that point.
+
+- **Sealed events:** `investigation.start`, each `tool.call` (name + args +
+  sha256 of result — hash, not full body, to keep rows small),
+  `remediation.proposed`, `remediation.executed`, `audit.verdict`,
+  `investigation.finish`.
+- **Verify:** `store.verify_ledger()` recomputes the whole chain →
+  `(ok, entries_checked, bad_seq)`. Exposed at `GET /api/ledger/verify` and per
+  investigation at `GET /reports/{id}/ledger`. CLI: `scripts/verify_ledger.py`
+  (`make verify-ledger`).
+
+### 3. Scored benchmark — agentk-bench (`scripts/benchmark.py`)
+Drives the real chaos + firing webhook per fault class, lets Agent K run its live
+investigation, then scores the **stored** verdict deterministically against
+ground truth (`make benchmark` / `make benchmark-quick`):
+
+- **Dimensions:** detection, localization (right service), classification (right
+  fault signature), remediation (right guarded action), groundedness (auditor).
+- **Healthy control:** the agent must NOT page/remediate → **false-alarm rate**
+  (target 0%; non-zero → non-zero exit code).
+- Deterministic scoring means a run cannot pass on a hallucinated narrative.
+- **Output:** `docs/benchmark/BENCHMARK.md` (headline + per-run table) +
+  `docs/benchmark/results.json`. Shared live-run plumbing factored into
+  `scripts/_harness.py` (also used by `test_live.py`).
 
 ---
 
@@ -289,7 +362,7 @@ FastAPIInstrumentor.instrument_app(app)
 
 Idempotent REST-based provisioner against SigNoz API v1:
 1. Creates notification channels: `agent-k-webhook` (→ agent:9000) + optional `agent-k-slack`
-2. Creates **7** alert rules from `alerts/*.json`
+2. Creates **8** alert rules from `alerts/*.json`
 3. Creates **4** dashboards from `dashboards/*.json`
 4. Creates **6** saved Explorer views from `views/*.json` (`compositeQuery.panelType: "list"`)
 
@@ -332,6 +405,9 @@ canonical hostnames:
 | `make provision` | Provision dashboards + alerts + views into SigNoz |
 | `make provision-fresh` | Delete and recreate Agent K dashboards/alerts/views |
 | `make test-live` | Live E2E harness (health, manual investigate, chaos scenarios) |
+| `make benchmark` | agentk-bench: scored run (2/class + control) → `docs/benchmark/` |
+| `make benchmark-quick` | agentk-bench fast (1/class) |
+| `make verify-ledger` | Recompute + prove the hash-chained ledger is intact |
 | `make demo-warm` | resolve → baseline → bad-deploy → fire webhook |
 | `make incident-bad-deploy` | Trigger bad-deploy chaos |
 | `make incident-pool` | Trigger pool-exhaustion chaos |
@@ -347,7 +423,7 @@ canonical hostnames:
 ## Known Design Decisions
 
 1. **Hand-rolled agent loop** (not LangChain) — smaller, fully traceable, reads better in blog
-2. **MCP + REST fallback** — try MCP first, fall back to direct REST if unavailable
+2. **MCP-only, fail loud** — MCP is the sole tool path; if it is down the investigation is marked `failed` with a clear report rather than degrading to a silent partial. (No REST fallback — the earlier `tools_rest.py` idea was dropped.)
 3. **Redis-driven deploys, no docker-in-docker** — checkout reads `chaos:checkout-version` per request; "deploy"/"rollback" = key flip + deploy-bot marker log. Only the `restart` action touches docker (ro socket, label-based lookup)
 4. **HMAC approval links** — no Slack app needed, just incoming webhook + signed URLs
 5. **signoz:// placeholders** — LLM outputs `signoz://trace/<id>`, report.py rewrites to real URLs
@@ -364,7 +440,7 @@ canonical hostnames:
 
 1. `make up` → SigNoz UI shows traces from all 4 services
 2. `make incident-bad-deploy` → symptoms visible in Explorer
-3. `make provision` → 7 alerts + 4 dashboards + 6 views exist; webhook fires
+3. `make provision` → 8 alerts + 4 dashboards + 6 views exist; webhook fires
 4. Agent produces correct RCA using ≥6 SigNoz tools
 5. Full loop: alert → webhook → investigation → Slack RCA → approve → rollback → verify
 6. All 4 scenarios produce correct root causes
