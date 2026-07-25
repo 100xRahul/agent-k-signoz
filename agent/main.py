@@ -282,8 +282,9 @@ async def list_reports(request: Request) -> HTMLResponse:
     """List all investigation reports."""
     investigations = store.list_investigations()
     return templates.TemplateResponse(
+        request,
         "reports.html",
-        {"request": request, "investigations": investigations},
+        {"investigations": investigations},
     )
 
 
@@ -302,9 +303,9 @@ async def get_report(investigation_id: str, request: Request) -> HTMLResponse:
         )
 
     return templates.TemplateResponse(
+        request,
         "report_detail.html",
         {
-            "request": request,
             "investigation": investigation,
             "report_html": report_html,
             "signoz_url": settings.signoz_url,
