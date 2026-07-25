@@ -1,7 +1,7 @@
 # I Built an AI SRE That Debugs Through SigNoz — and SigNoz Watches It Back
 
 > **Agents of SigNoz** hackathon submission (WeMakeDevs × SigNoz, July 2026) · Track 1: AI & Agent Observability
-> Repo: _<add your public GitHub link>_ · Demo: _<add your YouTube link>_
+> Repo: https://github.com/100xRahul/agent-k-signoz · Demo: _<add your YouTube link>_
 
 ---
 
