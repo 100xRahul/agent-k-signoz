@@ -1,0 +1,78 @@
+{
+  "timestamp": "2026-07-25T16:44:56.980219+00:00",
+  "meta": {
+    "runs": 1,
+    "agent_url": "http://localhost:9000",
+    "warmup_s": 35
+  },
+  "summary": {
+    "detection": "100% (4/4)",
+    "localization": "100% (4/4)",
+    "classification": "100% (4/4)",
+    "remediation": "67% (2/3)",
+    "groundedness": "100% (4/4)",
+    "false_alarm_rate": "0% (0/1)"
+  },
+  "runs": [
+    {
+      "label": "healthy-control",
+      "investigation_id": "00c868ca3560",
+      "status": "done",
+      "detected": false,
+      "localized": false,
+      "classified": false,
+      "remediation_ok": null,
+      "grounded": true,
+      "false_alarm": false,
+      "root_cause": "No elevated errors or ERROR logs found for checkout or payment in the last 15 minutes; services operating normally."
+    },
+    {
+      "label": "bad-deploy",
+      "investigation_id": "03a9bd3486f1",
+      "status": "done",
+      "detected": true,
+      "localized": true,
+      "classified": true,
+      "remediation_ok": true,
+      "grounded": true,
+      "false_alarm": null,
+      "root_cause": "Checkout v1.4.2 introduced a failing code path causing 'bad-deploy: simulated failure' errors and 500s downstream."
+    },
+    {
+      "label": "pool-exhaustion",
+      "investigation_id": "1e44e75e4845",
+      "status": "done",
+      "detected": true,
+      "localized": true,
+      "classified": true,
+      "remediation_ok": true,
+      "grounded": true,
+      "false_alarm": null,
+      "root_cause": "Payment service v1.0.0 exhausted its DB connection pool causing 503 timeouts (\"pool exhaustion: timeout acquiring connection\") which cascaded to checkout/gateway failures."
+    },
+    {
+      "label": "flag-combo",
+      "investigation_id": "3c1dbbdb0dfe",
+      "status": "done",
+      "detected": true,
+      "localized": true,
+      "classified": true,
+      "remediation_ok": false,
+      "grounded": true,
+      "false_alarm": null,
+      "root_cause": "Checkout service rejects requests when both 'new-checkout' and 'express-pay' flags are present (explicit conflict behavior)."
+    },
+    {
+      "label": "secret-leak",
+      "investigation_id": "ebedd189e6f8",
+      "status": "done",
+      "detected": true,
+      "localized": true,
+      "classified": true,
+      "remediation_ok": null,
+      "grounded": true,
+      "false_alarm": null,
+      "root_cause": "The payment service (v1.0.0) is directly logging AWS access keys and RSA private keys from /app/app.py (pay, line 104), exposing secrets in production logs."
+    }
+  ]
+}

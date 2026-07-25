@@ -137,11 +137,28 @@ def score_control(inv: dict | None) -> RunScore:
     s.investigation_id = inv.get("id", "")
     s.status = inv.get("status", "missing")
     s.root_cause = inv.get("root_cause", "")
-    text = _text(inv)
     actions = inv.get("actions") or []
+    # A false alarm = the agent PAGED (proposed a remediation) on a healthy
+    # system, OR its root cause positively asserts a concrete fault. Match only
+    # the root_cause (not the report body — the template has a literal
+    # "Regression onset:" line) and only when it did NOT declare the system
+    # healthy, so a correct "no issue found" verdict never counts against it.
+    rc = (inv.get("root_cause") or "").lower()
     paged = len(actions) > 0
-    claimed_fault = any(tok in text for tok in FALSE_ALARM_TOKENS)
-    s.false_alarm = bool(paged or claimed_fault)
+    declared_healthy = any(
+        p in rc
+        for p in (
+            "no elevated", "no operational", "no error", "operating normal",
+            "no issue", "healthy", "no incident", "nominal", "no anomal",
+            "no fault", "no regression",
+        )
+    )
+    asserts_fault = any(
+        tok in rc
+        for tok in ("bad-deploy", "1.4.2", "pool exhaust", "secret leak",
+                    "flag conflict", "regression detected", "deploy introduced")
+    )
+    s.false_alarm = bool(paged or (asserts_fault and not declared_healthy))
     audit = inv.get("audit") or {}
     if audit:
         s.grounded = audit.get("outcome") == "grounded"
