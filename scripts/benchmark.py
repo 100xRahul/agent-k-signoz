@@ -170,10 +170,18 @@ def run_fault(base: str, fc: FaultClass, warmup: int, timeout: int) -> RunScore:
     return s
 
 
+# The control must judge a genuinely clean window — after resolving chaos, wait
+# long enough that recent error traces age out of the agent's query window,
+# otherwise it correctly pages on leftover faults and the run reads as a false
+# alarm. Runs FIRST (before any fault is injected) for the same reason.
+CONTROL_SETTLE_S = 120
+
+
 def run_control(base: str, warmup: int, timeout: int) -> RunScore:
     print("\n▶ control: healthy system")
     run_make("resolve")
-    time.sleep(warmup)
+    print(f"  settling {CONTROL_SETTLE_S}s so recent errors clear the window...")
+    time.sleep(CONTROL_SETTLE_S)
     started = time.time()
     post_json(
         f"{base}/investigate",
@@ -269,9 +277,9 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--agent-url", default="http://localhost:9000")
     parser.add_argument("--runs", type=int, default=2, help="runs per class")
-    parser.add_argument("--warmup", type=int, default=20,
+    parser.add_argument("--warmup", type=int, default=35,
                         help="seconds of faulty traffic before firing")
-    parser.add_argument("--timeout", type=int, default=360,
+    parser.add_argument("--timeout", type=int, default=420,
                         help="per-investigation wait timeout (s)")
     parser.add_argument("--skip-control", action="store_true")
     args = parser.parse_args()
@@ -284,10 +292,11 @@ def main() -> int:
 
     scores: list[RunScore] = []
     for _ in range(args.runs):
-        for fc in FAULT_CLASSES:
-            scores.append(run_fault(base, fc, args.warmup, args.timeout))
+        # Control first, on a clean window, before any fault is injected.
         if not args.skip_control:
             scores.append(run_control(base, args.warmup, args.timeout))
+        for fc in FAULT_CLASSES:
+            scores.append(run_fault(base, fc, args.warmup, args.timeout))
 
     run_make("resolve")
 

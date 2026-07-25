@@ -46,8 +46,18 @@ must NEVER be flagged: action IDs, approval endpoints/URLs (e.g. \
 saved", the agent's own Confidence label, the cost/token footer, "Investigation \
 started: now", and generic status lines. Judge only substantive claims about the \
 incident itself.
-- A substantive claim is UNSUPPORTED only if its specific value does not appear \
-in, and cannot be directly computed from, the evidence or context.
+- The report's ROOT-CAUSE conclusion is a diagnostic INFERENCE, not a directly \
+observed fact. Do NOT flag a causal/diagnostic conclusion (e.g. "the v1.4.2 \
+deploy introduced the failure", "pool exhaustion caused the timeouts", "the \
+flag combination triggers the errors") as unsupported merely because that exact \
+sentence is not in the evidence. If the evidence it rests on — deploy markers, \
+error-rate spikes, status_messages, timing correlation — reasonably supports the \
+inference, it is GROUNDED. RCA is inference from correlated evidence; judge \
+whether the evidence backs the conclusion, not whether the conclusion is quoted.
+- A substantive claim is UNSUPPORTED only when it asserts a SPECIFIC VALUE (a \
+number, timestamp, version, or named entity) that the evidence does not contain \
+and cannot compute. A qualitative conclusion supported by cited evidence is not \
+unsupported.
 - Vague prose ("errors increased") without a backing number is a weak claim, not \
 unsupported — only flag concrete numbers/entities stated as fact.
 - Do NOT re-investigate or add new analysis. Judge only what is written.
