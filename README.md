@@ -15,13 +15,14 @@ An autonomous on-call SRE agent that investigates production incidents through S
 │ + loadgen (steady traffic) + chaos CLI          │
 └───────────────┬─────────────────────────────────┘
                 │ OTLP
-        ┌───────▼────────┐   alert webhook   ┌──────────────┐
-        │     SigNoz     │──────────────────▶│   AGENT K    │
-        │ (self-hosted)  │◀──────────────────│ FastAPI +    │
-        └───────▲────────┘  MCP / API v5     │ LLM agent   │
-                │ OTLP (agent's own traces,  │ loop         │
-                │ gen_ai.* spans, cost)      └──────┬───────┘
-                └───────────────────────────────────┘
+        ┌───────▼────────┐   alert webhook   ┌────────────────────┐
+        │     SigNoz     │──────────────────▶│      AGENT K       │
+        │ (self-hosted)  │◀──────────────────│ FastAPI + LLM loop │
+        └───────▲────────┘  MCP / API v5     │ → auditor gate     │
+                │ OTLP (agent's own traces,  │ → hash-chain ledger│
+                │ gen_ai.* spans, cost,      └─────────┬──────────┘
+                │ audit groundedness)                  │
+                └──────────────────────────────────────┘
                                              Slack (RCA + approval)
 ```
 
@@ -90,7 +91,7 @@ Beyond the demo, three things a judge can verify independently:
 | **Technical Excellence** | Full OTel semconv (incl. gen_ai), dashboards/alerts-as-code, deterministic chaos harness, guarded remediation, hash-chained audit ledger, **scored benchmark with 0% false alarms** |
 | **Best Use of SigNoz** | All signals + dashboards + alerts + **MCP server** + **QB v5 rubric dashboard** + saved views |
 | **UX** | Slack-native RCA with deep links + one-click approve; `/reports` web page; 6 saved Explorer views |
-| **Presentation** | [Demo script](docs/demo-script.md) · [Submission blog](blog/submission-blog.md) · sample RCAs in `reports/` |
+| **Presentation** | [Submission blog](blog/submission-blog.md) · [Architecture](docs/architecture.md) · sample RCAs in `reports/` · reproducible [`make benchmark`](docs/benchmark/) |
 
 ## 🔒 Security Notes
 
@@ -141,10 +142,11 @@ agent-k/
 │  ├─ views/                   # 6 saved Explorer views
 │  └─ provision.py             # Idempotent provisioning script
 ├─ reports/                    # Sample RCAs + generated reports
-├─ scripts/                    # verify_checkpoints, incident_budget, verify_rubric
-└─ docs/                       # demo-script.md, architecture.md
+├─ deploy/signoz/              # Foundry casting.yaml + casting.yaml.lock (reproducible)
+├─ scripts/                    # benchmark, verify_ledger, verify_rubric, fire_webhook, …
+└─ docs/                       # architecture.md, benchmark/ (generated results)
 ```
 
 ---
 
-*Built with ❤️ for the "Agents of SigNoz" hackathon by a human + Claude Code team.*
+*Built with ❤️ for the "Agents of SigNoz"
